@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "space.manus.music.store.bilong.yumi",
+  "productName": "Music Store Bilong Yumi",
+  "directories": {
+    "output": "dist-electron"
+  },
+  "extraMetadata": {
+    "main": "electron-main.js",
+    "author": "Music Store Bilong Yumi",
+    "description": "Music Store Bilong Yumi Desktop Application"
+  },
+  "files": [
+    "dist/**/*",
+    "electron-main.js",
+    "assets/**/*",
+    "!node_modules/**/*",
+    "!android/**/*"
+  ],
+  "nodeGypRebuild": false,
+  "npmRebuild": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "msi",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "assets/images/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Music Store Bilong Yumi"
+  },
+  "msi": {
+    "oneClick": true,
+    "shortcutName": "Music Store Bilong Yumi"
+  }
+}
