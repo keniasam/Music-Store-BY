@@ -6,7 +6,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
-import { useAudioPlayer } from "@/lib/audio-player-context";
+import { useAudioPlayer, type PlayableTrack } from "@/lib/audio-player-context";
 import { trpc } from "@/lib/trpc";
 import { formatCurrency, formatNumber, APP_CONFIG } from "@/shared/config";
 
@@ -50,22 +50,26 @@ export default function LibraryScreen() {
   const isPremium = user?.subscriptionTier === "premium";
   const downloadsRemaining = isPremium ? -1 : Math.max(0, APP_CONFIG.freeDownloadLimit - (user?.downloadCount || 0));
 
-  const handlePlay = (track: any) => {
+  const handlePlay = (track: any, list?: any[]) => {
     if (!track.audioUrl) return;
     if (currentTrack?.id === track.id) {
       togglePlayPause();
     } else {
-      playTrack({
-        id: track.id,
-        title: track.title,
-        artist: track.artist || "My Song",
-        genre: track.genre,
-        duration: track.duration,
-        audioUrl: track.audioUrl,
-        coverUrl: track.coverUrl,
-        price: track.price,
-        isFree: track.isFree,
+      const toItem = (t: any): PlayableTrack => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist || "My Song",
+        genre: t.genre,
+        duration: t.duration,
+        audioUrl: t.audioUrl,
+        coverUrl: t.coverUrl,
+        price: t.price,
+        isFree: t.isFree,
+        masteringPreset: t.masteringPreset,
+        masteringLevel: t.masteringLevel,
       });
+      const queueList = list ? list.filter((t) => !!t?.audioUrl).map(toItem) : undefined;
+      playTrack(toItem(track), queueList);
     }
   };
 
@@ -218,7 +222,7 @@ export default function LibraryScreen() {
                     </View>
                   </TouchableOpacity>
                   <TouchableOpacity 
-                    onPress={() => handlePlay(track)}
+                    onPress={() => handlePlay(track, userTracks)}
                     className="w-9 h-9 rounded-full items-center justify-center ml-2"
                     style={{ backgroundColor: colors.primary + '20' }}
                   >
@@ -309,7 +313,8 @@ export default function LibraryScreen() {
                   >
                     <TouchableOpacity
                       onPress={() => {
-                        if (trk) handlePlay(trk);
+                        const downloadTracks = (userDownloads || []).map((d) => (d as any).track).filter(Boolean);
+                        if (trk) handlePlay(trk, downloadTracks);
                       }}
                       className="w-12 h-12 rounded-xl items-center justify-center mr-3 overflow-hidden shadow-sm"
                       style={{ backgroundColor: colors.surface }}
@@ -423,7 +428,7 @@ export default function LibraryScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity 
-                    onPress={() => handlePlay(track)}
+                    onPress={() => handlePlay(track, userLikes)}
                     className="w-9 h-9 rounded-full items-center justify-center ml-2"
                     style={{ backgroundColor: colors.primary + '20' }}
                   >

@@ -83,6 +83,14 @@ const MAPPING = {
   "trash.fill": "delete",
   "pencil": "edit",
   "slider.horizontal.3": "tune",
+  "person.crop.circle.fill": "account-circle",
+  "person.crop.circle": "account-circle",
+  "arrow.counterclockwise": "replay-10",
+  "arrow.clockwise": "forward-10",
+  "circle": "radio-button-unchecked",
+  "phone.fill": "phone",
+  "repeat": "repeat",
+  "shuffle": "shuffle",
   
   // Code icon (from original)
   "chevron.left.forwardslash.chevron.right": "code",

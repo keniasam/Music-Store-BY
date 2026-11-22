@@ -16,6 +16,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
+import { useAudioPlayer } from "@/lib/audio-player-context";
 import { trpc } from "@/lib/trpc";
 import { GENRES, MASTERING_PRESETS, MASTERING_LEVELS, APP_CONFIG, formatCurrency } from "@/shared/config";
 
@@ -25,6 +26,7 @@ export default function CreateScreen() {
   const colors = useColors();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
+  const { currentTrack, isPlaying, playTrack, togglePlayPause, applyMasteringPreset } = useAudioPlayer();
   const [mode, setMode] = useState<CreateMode>("menu");
 
   // Queries
@@ -271,6 +273,7 @@ export default function CreateScreen() {
 
     setIsApplyingMaster(true);
     try {
+      applyMasteringPreset(selectedPreset, masteringLevel);
       await updateTrackMutation.mutateAsync({
         id: selectedTrackId,
         masteringPreset: selectedPreset,
@@ -739,7 +742,7 @@ export default function CreateScreen() {
               </ScrollView>
             )}
 
-            <Text className="text-foreground font-semibold mb-2 text-xs">2. Select Mastering Preset</Text>
+            <Text className="text-foreground font-semibold mb-2 text-xs">2. Select Mastering Preset (Live DSP EQ)</Text>
             {MASTERING_PRESETS.free.map((preset) => (
               <TouchableOpacity
                 key={preset.id}
@@ -748,7 +751,10 @@ export default function CreateScreen() {
                   backgroundColor: selectedPreset === preset.id ? colors.primary + '15' : colors.surface,
                   borderColor: selectedPreset === preset.id ? colors.primary : colors.border,
                 }}
-                onPress={() => setSelectedPreset(preset.id)}
+                onPress={() => {
+                  setSelectedPreset(preset.id);
+                  applyMasteringPreset(preset.id, masteringLevel);
+                }}
               >
                 <View className="flex-1">
                   <Text className="text-foreground font-bold text-sm">{preset.name}</Text>
@@ -770,7 +776,10 @@ export default function CreateScreen() {
                     backgroundColor: masteringLevel === lvl.id ? colors.primary : colors.surface,
                     borderColor: masteringLevel === lvl.id ? colors.primary : colors.border,
                   }}
-                  onPress={() => setMasteringLevel(lvl.id)}
+                  onPress={() => {
+                    setMasteringLevel(lvl.id);
+                    applyMasteringPreset(selectedPreset, lvl.id);
+                  }}
                 >
                   <Text className="text-xs font-semibold" style={{ color: masteringLevel === lvl.id ? '#fff' : colors.foreground }}>
                     {lvl.name}
@@ -778,6 +787,45 @@ export default function CreateScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {selectedTrackId && userTracks && (
+              <TouchableOpacity
+                className="py-3 rounded-2xl items-center border flex-row justify-center mb-3"
+                style={{ backgroundColor: colors.surface, borderColor: colors.primary }}
+                onPress={() => {
+                  const chosen = userTracks.find((t) => t.id === selectedTrackId);
+                  if (!chosen) return;
+                  if (currentTrack?.id === chosen.id) {
+                    togglePlayPause();
+                  } else {
+                    playTrack({
+                      id: chosen.id,
+                      title: chosen.title,
+                      artist: user?.name || "PNG Artist",
+                      genre: chosen.genre,
+                      duration: chosen.duration,
+                      audioUrl: chosen.audioUrl,
+                      coverUrl: chosen.coverUrl,
+                      price: chosen.price,
+                      isFree: chosen.isFree,
+                      masteringPreset: selectedPreset,
+                      masteringLevel,
+                    });
+                  }
+                }}
+              >
+                <IconSymbol
+                  name={currentTrack?.id === selectedTrackId && isPlaying ? "pause.fill" : "play.fill"}
+                  size={18}
+                  color={colors.primary}
+                />
+                <Text className="font-semibold text-sm ml-2" style={{ color: colors.primary }}>
+                  {currentTrack?.id === selectedTrackId && isPlaying
+                    ? "Pause Live DSP Preview"
+                    : "Live Preview Track with EQ"}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity 
               className="py-4 rounded-2xl items-center shadow-md"

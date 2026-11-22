@@ -8,7 +8,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 export function MiniPlayer() {
   const router = useRouter();
   const colors = useColors();
-  const { currentTrack, isPlaying, position, duration, togglePlayPause, stop } = useAudioPlayer();
+  const { currentTrack, queue, isPlaying, position, duration, togglePlayPause, playNext, playPrevious, stop } = useAudioPlayer();
 
   if (!currentTrack) {
     return null;
@@ -81,7 +81,16 @@ export function MiniPlayer() {
           </Text>
         </TouchableOpacity>
 
-        {/* Play / Pause Button */}
+        {/* Skip Previous / Play / Skip Next */}
+        {queue.length > 1 && (
+          <TouchableOpacity 
+            onPress={playPrevious}
+            className="w-8 h-8 items-center justify-center mr-1"
+          >
+            <IconSymbol name="backward.fill" size={16} color={colors.foreground} />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity 
           onPress={togglePlayPause}
           className="w-10 h-10 rounded-full items-center justify-center mr-1"
@@ -93,6 +102,15 @@ export function MiniPlayer() {
             color="#fff" 
           />
         </TouchableOpacity>
+
+        {queue.length > 1 && (
+          <TouchableOpacity 
+            onPress={playNext}
+            className="w-8 h-8 items-center justify-center mr-1"
+          >
+            <IconSymbol name="forward.fill" size={16} color={colors.foreground} />
+          </TouchableOpacity>
+        )}
 
         {/* Dismiss / Stop Button */}
         <TouchableOpacity 

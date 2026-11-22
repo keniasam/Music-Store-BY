@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
@@ -37,14 +38,18 @@ export default function TrackDetailScreen() {
   const { user, isAuthenticated } = useAuth();
   const {
     currentTrack,
+    queue,
     isPlaying,
     position,
     duration,
     playTrack,
+    playNext,
+    playPrevious,
     togglePlayPause,
     seekTo,
     saveTrackOffline,
     isOfflineSaved,
+    activeMasteringPreset,
   } = useAudioPlayer();
 
   const [commentText, setCommentText] = useState("");
@@ -107,8 +112,20 @@ export default function TrackDetailScreen() {
         coverUrl: track.coverUrl,
         price: track.price,
         isFree: track.isFree,
+        masteringPreset: track.masteringPreset,
+        masteringLevel: track.masteringLevel,
       });
       incrementPlayMutation.mutate({ id: track.id });
+    }
+  };
+
+  const handleDialUssd = async () => {
+    const ussdCode = selectedBank === "bsp" ? "*131#" : "*888#";
+    const dialUri = selectedBank === "bsp" ? "tel:*131%23" : "tel:*888%23";
+    try {
+      await Linking.openURL(dialUri);
+    } catch {
+      Alert.alert("Dial USSD Code", `Please dial ${ussdCode} on your mobile phone keypad to complete payment.`);
     }
   };
 
@@ -399,6 +416,19 @@ export default function TrackDetailScreen() {
                 </Text>
               </View>
             )}
+            {(track.masteringPreset || (isCurrentPlayingTrack && activeMasteringPreset !== "balanced")) && (
+              <View
+                className="px-3 py-1 rounded-full"
+                style={{ backgroundColor: colors.gold + "20" }}
+              >
+                <Text
+                  className="text-xs font-semibold"
+                  style={{ color: colors.gold }}
+                >
+                  DSP: {track.masteringPreset || activeMasteringPreset}
+                </Text>
+              </View>
+            )}
             <View className="flex-row items-center ml-auto">
               <IconSymbol name="play.fill" size={14} color={colors.muted} />
               <Text className="text-muted text-xs ml-1">
@@ -459,7 +489,17 @@ export default function TrackDetailScreen() {
         </View>
 
         {/* Playback Controls */}
-        <View className="flex-row items-center justify-center mt-4 gap-6">
+        <View className="flex-row items-center justify-center mt-4 gap-4">
+          {queue.length > 1 && (
+            <TouchableOpacity
+              onPress={playPrevious}
+              className="w-11 h-11 rounded-full items-center justify-center"
+              style={{ backgroundColor: colors.surface }}
+            >
+              <IconSymbol name="backward.fill" size={20} color={colors.foreground} />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={() => seekTo(Math.max(0, activePosition - 15))}
             className="w-12 h-12 rounded-full items-center justify-center"
@@ -487,6 +527,16 @@ export default function TrackDetailScreen() {
           >
             <IconSymbol name="arrow.clockwise" size={22} color={colors.foreground} />
           </TouchableOpacity>
+
+          {queue.length > 1 && (
+            <TouchableOpacity
+              onPress={playNext}
+              className="w-11 h-11 rounded-full items-center justify-center"
+              style={{ backgroundColor: colors.surface }}
+            >
+              <IconSymbol name="forward.fill" size={20} color={colors.foreground} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Action Button: Download or Buy */}
@@ -710,6 +760,17 @@ export default function TrackDetailScreen() {
                   </Text>
                 </>
               )}
+
+              <TouchableOpacity
+                onPress={handleDialUssd}
+                className="mt-3 py-2.5 px-4 rounded-xl flex-row items-center justify-center border"
+                style={{ backgroundColor: colors.primary + "18", borderColor: colors.primary }}
+              >
+                <IconSymbol name="phone.fill" size={16} color={colors.primary} />
+                <Text className="font-bold text-xs ml-2" style={{ color: colors.primary }}>
+                  {selectedBank === "bsp" ? "Dial *131# on Phone" : "Dial *888# on Phone"}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {/* Input Reference */}

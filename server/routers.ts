@@ -397,6 +397,15 @@ export const appRouter = router({
               totalEarnings: (currentEarnings + sellerAmt).toFixed(2),
             });
           }
+
+          const purchasedTrack = purchase.trackId ? await db.getTrackById(purchase.trackId) : null;
+          await db.createNotification({
+            userId: purchase.sellerId,
+            type: "purchase",
+            title: "New Track Sale! 🎵",
+            content: `A fan purchased "${purchasedTrack?.title || "your track"}" via ${input.paymentMethod.toUpperCase()} (Ref: ${input.transactionReference}). K ${purchase.sellerAmount} has been credited to your artist balance.`,
+            relatedId: purchase.id,
+          });
         }
 
         let downloadUrl = "";

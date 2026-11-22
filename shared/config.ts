@@ -81,6 +81,40 @@ export const PNG_BANKS = [
   { id: "kina", name: "Kina Bank", code: "KBL" },
 ] as const;
 
+export const PNG_REGIONS = [
+  { id: "All", name: "All Regions", provinces: "Nationwide PNG" },
+  { id: "Southern", name: "Southern", provinces: "Port Moresby, Central, Milne Bay, Gulf, Western, Oro" },
+  { id: "Momase", name: "Momase", provinces: "Morobe (Lae), Madang, East & West Sepik" },
+  { id: "Highlands", name: "Highlands", provinces: "Eastern Highlands, Simbu, WHP, Enga, SHP, Hela, Jiwaka" },
+  { id: "Islands", name: "New Guinea Islands", provinces: "East & West New Britain (Rabaul), New Ireland, Manus, AROB" },
+] as const;
+
+export type PngRegionId = typeof PNG_REGIONS[number]["id"];
+
+export function getTrackRegion(track: {
+  id?: number;
+  title?: string;
+  description?: string | null;
+  genre?: string | null;
+}): Exclude<PngRegionId, "All"> {
+  const text = `${track.title || ""} ${track.description || ""} ${track.genre || ""}`.toLowerCase();
+  if (/rabaul|islands|bougainville|arob|new ireland|manus|kimbe|kokopo|tolai/.test(text)) {
+    return "Islands";
+  }
+  if (/morobe|lae|sepik|madang|wewak|vanimo/.test(text)) {
+    return "Momase";
+  }
+  if (/highlands|goroka|hagen|simbu|kundiawa|enga|hela|jiwaka|mendi/.test(text)) {
+    return "Highlands";
+  }
+  if (/port moresby|moresby|pom|central|aroma|milne bay|alotau|kerema|daru|popondetta/.test(text)) {
+    return "Southern";
+  }
+  const regions: Exclude<PngRegionId, "All">[] = ["Southern", "Momase", "Highlands", "Islands"];
+  const idx = Math.abs(track.id || 0) % regions.length;
+  return regions[idx];
+}
+
 export interface ContactInfo {
   founder: string;
   bspAccount: string;

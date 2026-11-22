@@ -12,7 +12,7 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const systemScheme = useSystemColorScheme() ?? "light";
+  const systemScheme = useSystemColorScheme() ?? "dark";
   const [colorScheme, setColorSchemeState] = useState<ColorScheme>(systemScheme);
 
   const applyScheme = useCallback((scheme: ColorScheme) => {
@@ -26,6 +26,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       Object.entries(palette).forEach(([token, value]) => {
         root.style.setProperty(`--color-${token}`, value);
       });
+      if (document.body) {
+        document.body.style.backgroundColor = palette.background;
+      }
     }
   }, []);
 
@@ -61,8 +64,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }),
     [colorScheme, setColorScheme],
   );
-  console.log(value, themeVariables)
-
   return (
     <ThemeContext.Provider value={value}>
       <View style={[{ flex: 1 }, themeVariables]}>{children}</View>

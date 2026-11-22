@@ -5,9 +5,16 @@ import { useRouter } from "expo-router";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
-import { useAudioPlayer } from "@/lib/audio-player-context";
+import { useAudioPlayer, type PlayableTrack } from "@/lib/audio-player-context";
 import { trpc } from "@/lib/trpc";
-import { GENRES, formatCurrency, formatNumber } from "@/shared/config";
+import {
+  GENRES,
+  PNG_REGIONS,
+  type PngRegionId,
+  getTrackRegion,
+  formatCurrency,
+  formatNumber,
+} from "@/shared/config";
 
 // Featured PNG Artists
 const ARTISTS = [
@@ -17,12 +24,29 @@ const ARTISTS = [
   { id: 4, name: "Coastal Crew", followers: 15200, genre: "Hip Hop" },
 ];
 
+function toPlayable(t: any): PlayableTrack {
+  return {
+    id: t.id,
+    title: t.title,
+    artist: "PNG Artist",
+    genre: t.genre,
+    duration: t.duration,
+    audioUrl: t.audioUrl,
+    coverUrl: t.coverUrl,
+    price: t.price,
+    isFree: t.isFree,
+    masteringPreset: t.masteringPreset,
+    masteringLevel: t.masteringLevel,
+  };
+}
+
 export default function DiscoverScreen() {
   const colors = useColors();
   const router = useRouter();
   const { currentTrack, isPlaying, playTrack, togglePlayPause } = useAudioPlayer();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [selectedRegion, setSelectedRegion] = useState<PngRegionId>("All");
 
   // Queries
   const { data: searchResults, isLoading: isSearchLoading } = trpc.tracks.search.useQuery(
@@ -40,9 +64,13 @@ export default function DiscoverScreen() {
     { enabled: !searchQuery.trim() && !selectedGenre }
   );
 
-  const tracksToDisplay = searchQuery.trim().length > 0
+  const baseTracks = searchQuery.trim().length > 0
     ? (searchResults || [])
     : (selectedGenre ? (genreResults || []) : (trendingTracks || []));
+
+  const tracksToDisplay = selectedRegion === "All"
+    ? baseTracks
+    : baseTracks.filter((track) => getTrackRegion(track) === selectedRegion);
 
   const isLoading = isSearchLoading || isGenreLoading || isTrendingLoading;
 
@@ -50,23 +78,14 @@ export default function DiscoverScreen() {
     if (currentTrack?.id === track.id) {
       togglePlayPause();
     } else {
-      playTrack({
-        id: track.id,
-        title: track.title,
-        artist: "PNG Artist",
-        genre: track.genre,
-        duration: track.duration,
-        audioUrl: track.audioUrl,
-        coverUrl: track.coverUrl,
-        price: track.price,
-        isFree: track.isFree,
-      });
+      const queueList = tracksToDisplay.filter((t) => !!t.audioUrl).map(toPlayable);
+      playTrack(toPlayable(track), queueList);
     }
   };
 
   return (
     <ScreenContainer>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 110 }}
       >
@@ -78,7 +97,7 @@ export default function DiscoverScreen() {
 
         {/* Search Bar */}
         <View className="px-4 mt-4">
-          <View 
+          <View
             className="flex-row items-center px-4 py-3 rounded-2xl border"
             style={{ backgroundColor: colors.surface, borderColor: colors.border }}
           >
@@ -100,25 +119,54 @@ export default function DiscoverScreen() {
           </View>
         </View>
 
+        {/* PNG Regions Filter */}
+        <View className="mt-4">
+          <Text className="px-4 text-xs font-bold text-muted mb-2 tracking-wider">PNG REGIONS &amp; PROVINCES</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+          >
+            {PNG_REGIONS.map((region) => (
+              <TouchableOpacity
+                key={region.id}
+                className="px-3.5 py-1.5 rounded-full border"
+                style={{
+                  borderColor: selectedRegion === region.id ? colors.gold : colors.border,
+                  backgroundColor: selectedRegion === region.id ? colors.gold + "25" : colors.surface,
+                }}
+                onPress={() => setSelectedRegion(region.id)}
+              >
+                <Text
+                  className="text-xs font-semibold"
+                  style={{ color: selectedRegion === region.id ? colors.gold : colors.foreground }}
+                >
+                  {region.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Genre Filter */}
         <View className="mt-4">
           <Text className="px-4 text-xs font-bold text-muted mb-2 tracking-wider">GENRES</Text>
-          <ScrollView 
-            horizontal 
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
           >
             <TouchableOpacity
               className="px-3.5 py-1.5 rounded-full border"
-              style={{ 
+              style={{
                 borderColor: !selectedGenre ? colors.primary : colors.border,
                 backgroundColor: !selectedGenre ? colors.primary : colors.surface,
               }}
               onPress={() => setSelectedGenre(null)}
             >
-              <Text 
+              <Text
                 className="text-xs font-semibold"
-                style={{ color: !selectedGenre ? '#fff' : colors.muted }}
+                style={{ color: !selectedGenre ? "#fff" : colors.muted }}
               >
                 All Genres
               </Text>
@@ -127,15 +175,15 @@ export default function DiscoverScreen() {
               <TouchableOpacity
                 key={genre}
                 className="px-3.5 py-1.5 rounded-full border"
-                style={{ 
+                style={{
                   borderColor: selectedGenre === genre ? colors.primary : colors.border,
                   backgroundColor: selectedGenre === genre ? colors.primary : colors.surface,
                 }}
                 onPress={() => setSelectedGenre(genre)}
               >
-                <Text 
+                <Text
                   className="text-xs font-semibold"
-                  style={{ color: selectedGenre === genre ? '#fff' : colors.foreground }}
+                  style={{ color: selectedGenre === genre ? "#fff" : colors.foreground }}
                 >
                   {genre}
                 </Text>
@@ -150,22 +198,22 @@ export default function DiscoverScreen() {
             <View className="px-4 flex-row items-center justify-between mb-3">
               <Text className="text-lg font-bold text-foreground">Featured PNG Artists</Text>
             </View>
-            
-            <ScrollView 
-              horizontal 
+
+            <ScrollView
+              horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
             >
               {ARTISTS.map((artist) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={artist.id}
                   className="items-center p-3 rounded-2xl border"
                   style={{ width: 120, backgroundColor: colors.surface, borderColor: colors.border }}
                   onPress={() => setSearchQuery(artist.name)}
                 >
-                  <View 
+                  <View
                     className="w-16 h-16 rounded-full items-center justify-center mb-2"
-                    style={{ backgroundColor: colors.primary + '20' }}
+                    style={{ backgroundColor: colors.primary + "20" }}
                   >
                     <IconSymbol name="person.fill" size={28} color={colors.primary} />
                   </View>
@@ -187,77 +235,89 @@ export default function DiscoverScreen() {
         {/* Tracks List */}
         <View className="mt-6 px-4">
           <Text className="text-lg font-bold text-foreground mb-3">
-            {searchQuery.trim() 
-              ? `Results for "${searchQuery}" (${tracksToDisplay.length})` 
-              : (selectedGenre ? `${selectedGenre} Music` : "Trending Tracks")}
+            {searchQuery.trim()
+              ? `Results for "${searchQuery}" (${tracksToDisplay.length})`
+              : (selectedGenre ? `${selectedGenre} Music` : "Trending Tracks") +
+                (selectedRegion !== "All" ? ` • ${selectedRegion}` : "")}
           </Text>
-          
+
           {isLoading ? (
             <ActivityIndicator color={colors.primary} className="my-6" />
           ) : tracksToDisplay.length === 0 ? (
             <View className="items-center py-10">
               <IconSymbol name="magnifyingglass" size={40} color={colors.muted} />
               <Text className="text-foreground font-semibold mt-3">No tracks found</Text>
-              <Text className="text-muted text-xs mt-1">Try another search term or genre</Text>
+              <Text className="text-muted text-xs mt-1">Try another search term, region, or genre</Text>
             </View>
           ) : (
-            tracksToDisplay.map((track) => (
-              <TouchableOpacity 
-                key={track.id}
-                className="flex-row items-center py-3 border-b"
-                style={{ borderBottomColor: colors.border }}
-                onPress={() => router.push(`/track/${track.id}` as any)}
-              >
-                <View 
-                  className="w-13 h-13 rounded-xl items-center justify-center mr-3 overflow-hidden"
-                  style={{ backgroundColor: colors.primary + '20', width: 52, height: 52 }}
+            tracksToDisplay.map((track) => {
+              const region = getTrackRegion(track);
+              return (
+                <TouchableOpacity
+                  key={track.id}
+                  className="flex-row items-center py-3 border-b"
+                  style={{ borderBottomColor: colors.border }}
+                  onPress={() => router.push(`/track/${track.id}` as any)}
                 >
-                  {track.coverUrl ? (
-                    <Image source={{ uri: track.coverUrl }} className="w-full h-full" resizeMode="cover" />
-                  ) : (
-                    <IconSymbol name="music.note" size={22} color={colors.primary} />
-                  )}
-                </View>
-                <View className="flex-1 mr-2">
-                  <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
-                    {track.title}
-                  </Text>
-                  <Text className="text-muted text-xs mt-0.5" numberOfLines={1}>
-                    PNG Artist
-                  </Text>
-                  <View className="flex-row items-center mt-1">
-                    {track.genre && (
-                      <View 
-                        className="px-2 py-0.5 rounded-full mr-2"
-                        style={{ backgroundColor: colors.surface }}
-                      >
-                        <Text className="text-muted text-[10px] font-medium">{track.genre}</Text>
-                      </View>
-                    )}
-                    <Text className="text-muted text-[10px]">{formatNumber(track.playCount)} plays</Text>
-                  </View>
-                </View>
-                <View className="items-end mr-3">
-                  <Text 
-                    className="font-bold text-xs"
-                    style={{ color: track.isFree ? colors.success : colors.primary }}
+                  <View
+                    className="w-13 h-13 rounded-xl items-center justify-center mr-3 overflow-hidden"
+                    style={{ backgroundColor: colors.primary + "20", width: 52, height: 52 }}
                   >
-                    {track.isFree ? "FREE" : formatCurrency(track.price)}
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  onPress={() => handlePlayTrack(track)}
-                  className="w-9 h-9 rounded-full items-center justify-center"
-                  style={{ backgroundColor: colors.primary + '20' }}
-                >
-                  <IconSymbol 
-                    name={currentTrack?.id === track.id && isPlaying ? "pause.fill" : "play.fill"} 
-                    size={16} 
-                    color={colors.primary} 
-                  />
+                    {track.coverUrl ? (
+                      <Image source={{ uri: track.coverUrl }} className="w-full h-full" resizeMode="cover" />
+                    ) : (
+                      <IconSymbol name="music.note" size={22} color={colors.primary} />
+                    )}
+                  </View>
+                  <View className="flex-1 mr-2">
+                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
+                      {track.title}
+                    </Text>
+                    <Text className="text-muted text-xs mt-0.5" numberOfLines={1}>
+                      PNG Artist
+                    </Text>
+                    <View className="flex-row items-center mt-1 flex-wrap gap-1.5">
+                      {track.genre && (
+                        <View
+                          className="px-2 py-0.5 rounded-full"
+                          style={{ backgroundColor: colors.surface }}
+                        >
+                          <Text className="text-muted text-[10px] font-medium">{track.genre}</Text>
+                        </View>
+                      )}
+                      <View
+                        className="px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: colors.gold + "18" }}
+                      >
+                        <Text className="text-[10px] font-semibold" style={{ color: colors.gold }}>
+                          {region}
+                        </Text>
+                      </View>
+                      <Text className="text-muted text-[10px]">{formatNumber(track.playCount)} plays</Text>
+                    </View>
+                  </View>
+                  <View className="items-end mr-3">
+                    <Text
+                      className="font-bold text-xs"
+                      style={{ color: track.isFree ? colors.success : colors.primary }}
+                    >
+                      {track.isFree ? "FREE" : formatCurrency(track.price)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handlePlayTrack(track)}
+                    className="w-9 h-9 rounded-full items-center justify-center"
+                    style={{ backgroundColor: colors.primary + "20" }}
+                  >
+                    <IconSymbol
+                      name={currentTrack?.id === track.id && isPlaying ? "pause.fill" : "play.fill"}
+                      size={16}
+                      color={colors.primary}
+                    />
+                  </TouchableOpacity>
                 </TouchableOpacity>
-              </TouchableOpacity>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>

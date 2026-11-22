@@ -1,14 +1,14 @@
 /** @type {const} */
 const themeColors = {
-  // PNG Flag inspired colors
-  primary: { light: '#B22234', dark: '#D4374A' },  // PNG Red
+  // PNG Flag inspired colors on Deep Teal (#002B36) dashboard theme
+  primary: { light: '#D4374A', dark: '#D4374A' },   // PNG Red
   secondary: { light: '#FFD700', dark: '#FFE44D' }, // PNG Gold
-  accent: { light: '#000000', dark: '#FFFFFF' },   // Black/White
-  background: { light: '#ffffff', dark: '#151718' },
-  surface: { light: '#f5f5f5', dark: '#1e2022' },
-  foreground: { light: '#11181C', dark: '#ECEDEE' },
-  muted: { light: '#687076', dark: '#9BA1A6' },
-  border: { light: '#E5E7EB', dark: '#334155' },
+  accent: { light: '#FFFFFF', dark: '#FFFFFF' },    // White contrast
+  background: { light: '#002B36', dark: '#002B36' }, // Attached image color (#002B36)
+  surface: { light: '#073642', dark: '#073642' },    // Elevated card surface
+  foreground: { light: '#ECEDEE', dark: '#ECEDEE' }, // Crisp light text
+  muted: { light: '#93A1A1', dark: '#9BA1A6' },      // Muted secondary text
+  border: { light: '#134E5E', dark: '#134E5E' },     // Subtle teal border
   success: { light: '#22C55E', dark: '#4ADE80' },
   warning: { light: '#F59E0B', dark: '#FBBF24' },
   error: { light: '#EF4444', dark: '#F87171' },
