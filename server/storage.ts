@@ -1,9 +1,15 @@
 // Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+// Uses the Biz-provided storage proxy or local filesystem fallback
 
 import { ENV } from "./_core/env";
+import path from "path";
+import fs from "fs";
 
 type StorageConfig = { baseUrl: string; apiKey: string };
+
+function hasForgeConfig(): boolean {
+  return Boolean(ENV.forgeApiUrl && ENV.forgeApiKey);
+}
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
@@ -65,31 +71,71 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
-  const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
-  const uploadUrl = buildUploadUrl(baseUrl, key);
-  const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: buildAuthHeaders(apiKey),
-    body: formData,
-  });
 
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText);
-    throw new Error(
-      `Storage upload failed (${response.status} ${response.statusText}): ${message}`,
-    );
+  // If Forge proxy is configured, use it
+  if (hasForgeConfig()) {
+    try {
+      const { baseUrl, apiKey } = getStorageConfig();
+      const uploadUrl = buildUploadUrl(baseUrl, key);
+      const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: buildAuthHeaders(apiKey),
+        body: formData,
+      });
+
+      if (response.ok) {
+        const url = (await response.json()).url;
+        return { key, url };
+      }
+    } catch (err) {
+      console.warn("[Storage] Cloud upload failed, falling back to local storage:", err);
+    }
   }
-  const url = (await response.json()).url;
-  return { key, url };
+
+  // Local filesystem fallback
+  try {
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    const filePath = path.resolve(uploadDir, key);
+    const dir = path.dirname(filePath);
+
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const buffer = Buffer.isBuffer(data)
+      ? data
+      : typeof data === "string"
+      ? Buffer.from(data, "base64")
+      : Buffer.from(data);
+
+    fs.writeFileSync(filePath, buffer);
+    const url = `/uploads/${key}`;
+    return { key, url };
+  } catch (error) {
+    console.error("[Storage] Local file save failed:", error);
+    throw new Error(`Failed to save file locally: ${String(error)}`);
+  }
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
-  const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
+
+  if (hasForgeConfig()) {
+    try {
+      const { baseUrl, apiKey } = getStorageConfig();
+      return {
+        key,
+        url: await buildDownloadUrl(baseUrl, key, apiKey),
+      };
+    } catch (err) {
+      console.warn("[Storage] Cloud get failed, falling back to local storage:", err);
+    }
+  }
+
   return {
     key,
-    url: await buildDownloadUrl(baseUrl, key, apiKey),
+    url: `/uploads/${key}`,
   };
 }

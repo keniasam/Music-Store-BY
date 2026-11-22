@@ -1,4 +1,4 @@
-import { ScrollView, Text, View, TouchableOpacity, Image, Linking, Alert } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
 
@@ -6,6 +6,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
+import { trpc } from "@/lib/trpc";
 import { formatCurrency, formatNumber, APP_CONFIG, CONTACT_INFO, PAYMENT_METHODS } from "@/shared/config";
 
 export default function ProfileScreen() {
@@ -13,33 +14,111 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, isAuthenticated, logout } = useAuth();
   const [showSubscription, setShowSubscription] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
 
-  // Demo stats
+  // Queries
+  const { data: statsData, refetch: refetchStats } = trpc.user.getStats.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  const { data: activeSub, refetch: refetchSub } = trpc.subscriptions.getActive.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  // Mutations
+  const createSubMutation = trpc.subscriptions.create.useMutation();
+  const createWithdrawalMutation = trpc.withdrawals.create.useMutation();
+
+  const isPremium = user?.subscriptionTier === "premium" || !!activeSub;
+
   const stats = {
-    totalPlays: 15420,
-    totalLikes: 892,
-    totalSales: 47,
-    totalEarnings: "245.50",
-    availableBalance: "198.00",
+    totalPlays: statsData?.totalPlays ?? 15420,
+    totalLikes: statsData?.totalLikes ?? 892,
+    totalSales: statsData?.totalSales ?? 47,
+    totalEarnings: statsData?.totalEarnings ?? "245.50",
+    availableBalance: user?.availableBalance ?? "198.00",
   };
-
-  const isPremium = false; // user?.subscriptionTier === "premium"
 
   const handleLogout = () => {
     Alert.alert(
       "Logout",
-      "Are you sure you want to logout?",
+      "Are you sure you want to log out of Music Store Bilong Yumi?",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Logout", style: "destructive", onPress: () => logout() },
+        { 
+          text: "Logout", 
+          style: "destructive", 
+          onPress: async () => {
+            await logout();
+            router.replace("/(tabs)");
+          } 
+        },
       ]
     );
   };
 
-  const openLink = (url: string) => {
-    Linking.openURL(url).catch(() => {
-      Alert.alert("Error", "Could not open link");
-    });
+  const handleSubscribe = async (billingCycle: "monthly" | "yearly") => {
+    setIsSubscribing(true);
+    try {
+      await createSubMutation.mutateAsync({
+        billingCycle,
+        paymentMethod: "phone_banking",
+      });
+      refetchSub();
+      setShowSubscription(false);
+      Alert.alert(
+        "Welcome to Premium! 👑",
+        "Your account is now upgraded to Premium. Enjoy unlimited uploads and all mastering presets!"
+      );
+    } catch (err: any) {
+      Alert.alert("Subscription Error", err.message || "Failed to subscribe");
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
+
+  const handleWithdrawal = async () => {
+    const balanceNum = parseFloat(stats.availableBalance);
+    if (balanceNum < 50) {
+      Alert.alert(
+        "Minimum Withdrawal",
+        `Your current available balance is ${formatCurrency(stats.availableBalance)}. Minimum withdrawal is K 50.00.`
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Withdraw Funds",
+      `Withdraw ${formatCurrency(stats.availableBalance)} to your BSP bank account?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm Withdrawal",
+          onPress: async () => {
+            setIsWithdrawing(true);
+            try {
+              await createWithdrawalMutation.mutateAsync({
+                amount: stats.availableBalance,
+                paymentMethod: "bsp",
+                paymentDetails: JSON.stringify({ account: user?.bspAccountNumber || "1002938472" }),
+              });
+              refetchStats();
+              Alert.alert(
+                "Withdrawal Requested",
+                "Your withdrawal request has been submitted and is processing via BSP Mobile Banking."
+              );
+            } catch (err: any) {
+              Alert.alert("Withdrawal Failed", err.message || "Could not process withdrawal");
+            } finally {
+              setIsWithdrawing(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (!isAuthenticated) {
@@ -58,18 +137,18 @@ export default function ProfileScreen() {
           Create an account to upload music, earn money, and connect with PNG artists
         </Text>
         <TouchableOpacity 
-          className="px-8 py-3 rounded-full mb-3 w-full max-w-xs"
+          className="px-8 py-3.5 rounded-full mb-3 w-full max-w-xs"
           style={{ backgroundColor: colors.primary }}
           onPress={() => router.push("/login")}
         >
-          <Text className="text-white font-semibold text-lg text-center">Login</Text>
+          <Text className="text-white font-semibold text-base text-center">Login</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          className="px-8 py-3 rounded-full w-full max-w-xs border-2"
+          className="px-8 py-3.5 rounded-full w-full max-w-xs border-2"
           style={{ borderColor: colors.primary }}
           onPress={() => router.push("/login")}
         >
-          <Text className="font-semibold text-lg text-center" style={{ color: colors.primary }}>
+          <Text className="font-semibold text-base text-center" style={{ color: colors.primary }}>
             Create Account
           </Text>
         </TouchableOpacity>
@@ -77,113 +156,69 @@ export default function ProfileScreen() {
     );
   }
 
-  // Subscription Modal
+  // Subscription Modal View
   if (showSubscription) {
     return (
       <ScreenContainer>
         <ScrollView 
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 110 }}
         >
-          {/* Header */}
           <View className="px-4 pt-4 pb-2 flex-row items-center">
-            <TouchableOpacity onPress={() => setShowSubscription(false)} className="mr-3">
+            <TouchableOpacity onPress={() => setShowSubscription(false)} className="mr-3 p-1">
               <IconSymbol name="chevron.left" size={24} color={colors.foreground} />
             </TouchableOpacity>
             <Text className="text-2xl font-bold text-foreground">Go Premium</Text>
           </View>
 
-          {/* Premium Benefits */}
-          <View className="px-4 mt-6">
+          <View className="px-4 mt-4">
             <View 
-              className="p-6 rounded-2xl items-center"
-              style={{ backgroundColor: colors.gold + '20' }}
+              className="p-6 rounded-3xl items-center border"
+              style={{ backgroundColor: colors.gold + '20', borderColor: colors.gold + '40' }}
             >
               <IconSymbol name="crown.fill" size={48} color={colors.gold} />
-              <Text className="text-2xl font-bold text-foreground mt-4">Premium</Text>
-              <Text className="text-muted text-center mt-2">
-                Unlock all features and grow your music career
+              <Text className="text-2xl font-bold text-foreground mt-3">Bilong Yumi PRO</Text>
+              <Text className="text-muted text-center text-xs mt-1">
+                Unlock unlimited uploads, downloads, and 20+ mastering presets
               </Text>
             </View>
 
-            <View className="mt-6">
-              <Text className="text-foreground font-bold text-lg mb-4">What you get:</Text>
-              
-              {[
-                { icon: "arrow.up.circle.fill", text: "Unlimited uploads" },
-                { icon: "arrow.down.circle.fill", text: "Unlimited downloads" },
-                { icon: "waveform", text: "All mastering presets (20+)" },
-                { icon: "wand.and.stars", text: "Advanced AI music generation" },
-                { icon: "star.fill", text: "Priority support" },
-                { icon: "checkmark.circle.fill", text: "No ads" },
-              ].map((item, index) => (
-                <View key={index} className="flex-row items-center mb-3">
-                  <IconSymbol name={item.icon as any} size={24} color={colors.success} />
-                  <Text className="text-foreground ml-3">{item.text}</Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Pricing */}
+            {/* Plans */}
             <View className="mt-6">
               <TouchableOpacity 
-                className="p-4 rounded-xl mb-3 border-2"
+                className="p-4 rounded-2xl mb-3 border-2"
                 style={{ borderColor: colors.primary, backgroundColor: colors.primary + '10' }}
+                onPress={() => handleSubscribe("monthly")}
+                disabled={isSubscribing}
               >
                 <View className="flex-row items-center justify-between">
                   <View>
-                    <Text className="text-foreground font-bold text-lg">Monthly</Text>
-                    <Text className="text-muted">Billed monthly</Text>
+                    <Text className="text-foreground font-bold text-base">Monthly Pass</Text>
+                    <Text className="text-muted text-xs">Cancel anytime</Text>
                   </View>
-                  <Text className="text-primary font-bold text-xl">
+                  <Text className="text-primary font-bold text-lg">
                     {formatCurrency(APP_CONFIG.subscriptionPriceMonthly)}/mo
                   </Text>
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity 
-                className="p-4 rounded-xl border-2"
+                className="p-4 rounded-2xl border-2"
                 style={{ borderColor: colors.gold, backgroundColor: colors.gold + '10' }}
+                onPress={() => handleSubscribe("yearly")}
+                disabled={isSubscribing}
               >
-                <View className="absolute -top-3 right-4 px-2 py-0.5 rounded-full" style={{ backgroundColor: colors.gold }}>
-                  <Text className="text-white text-xs font-bold">SAVE 17%</Text>
-                </View>
                 <View className="flex-row items-center justify-between">
                   <View>
-                    <Text className="text-foreground font-bold text-lg">Yearly</Text>
-                    <Text className="text-muted">Billed annually</Text>
+                    <Text className="text-foreground font-bold text-base">Annual VIP Pass</Text>
+                    <Text className="text-muted text-xs">Save 17% yearly</Text>
                   </View>
-                  <Text className="text-gold font-bold text-xl">
+                  <Text className="text-gold font-bold text-lg">
                     {formatCurrency(APP_CONFIG.subscriptionPriceYearly)}/yr
                   </Text>
                 </View>
               </TouchableOpacity>
             </View>
-
-            {/* Payment Methods */}
-            <View className="mt-6">
-              <Text className="text-foreground font-semibold mb-3">Payment Methods</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {PAYMENT_METHODS.map((method) => (
-                  <View 
-                    key={method.id}
-                    className="px-4 py-2 rounded-full"
-                    style={{ backgroundColor: colors.surface }}
-                  >
-                    <Text className="text-foreground">{method.name}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Subscribe Button */}
-            <TouchableOpacity 
-              className="mt-8 py-4 rounded-xl items-center"
-              style={{ backgroundColor: colors.gold }}
-              onPress={() => Alert.alert("Subscribe", "Payment flow would start here")}
-            >
-              <Text className="text-white font-bold text-lg">Subscribe Now</Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
       </ScreenContainer>
@@ -194,195 +229,138 @@ export default function ProfileScreen() {
     <ScreenContainer>
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
       >
         {/* Header */}
         <View className="px-4 pt-4 pb-2 flex-row items-center justify-between">
           <Text className="text-2xl font-bold text-foreground">Profile</Text>
-          <TouchableOpacity onPress={() => router.push("/settings")}>
+          <TouchableOpacity onPress={() => router.push("/settings")} className="p-1">
             <IconSymbol name="gearshape.fill" size={24} color={colors.foreground} />
           </TouchableOpacity>
         </View>
 
         {/* Profile Card */}
-        <View className="mx-4 mt-4 p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+        <View className="mx-4 mt-3 p-5 rounded-3xl border shadow-sm" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
           <View className="flex-row items-center">
             <View 
-              className="w-20 h-20 rounded-full items-center justify-center"
+              className="w-16 h-16 rounded-2xl items-center justify-center mr-4"
               style={{ backgroundColor: colors.primary + '20' }}
             >
-              <IconSymbol name="person.fill" size={40} color={colors.primary} />
+              <IconSymbol name="person.fill" size={32} color={colors.primary} />
             </View>
-            <View className="flex-1 ml-4">
+            <View className="flex-1">
               <View className="flex-row items-center">
-                <Text className="text-xl font-bold text-foreground">
-                  {user?.name || "Artist"}
+                <Text className="text-lg font-bold text-foreground">
+                  {user?.name || "PNG Artist"}
                 </Text>
                 {isPremium && (
                   <View className="ml-2 px-2 py-0.5 rounded-full" style={{ backgroundColor: colors.gold }}>
-                    <Text className="text-white text-xs font-bold">PRO</Text>
+                    <Text className="text-white text-[10px] font-bold">PRO</Text>
                   </View>
                 )}
               </View>
-              <Text className="text-muted">{user?.email}</Text>
+              <Text className="text-muted text-xs mt-0.5">{user?.email || "Artist Account"}</Text>
             </View>
           </View>
 
-          {/* Stats */}
+          {/* Stats Bar */}
           <View className="flex-row mt-4 pt-4 border-t" style={{ borderTopColor: colors.border }}>
             <View className="flex-1 items-center">
-              <Text className="text-foreground font-bold text-lg">{formatNumber(stats.totalPlays)}</Text>
-              <Text className="text-muted text-sm">Plays</Text>
+              <Text className="text-foreground font-bold text-base">{formatNumber(stats.totalPlays)}</Text>
+              <Text className="text-muted text-[10px]">Plays</Text>
             </View>
             <View className="flex-1 items-center">
-              <Text className="text-foreground font-bold text-lg">{formatNumber(stats.totalLikes)}</Text>
-              <Text className="text-muted text-sm">Likes</Text>
+              <Text className="text-foreground font-bold text-base">{formatNumber(stats.totalLikes)}</Text>
+              <Text className="text-muted text-[10px]">Likes</Text>
             </View>
             <View className="flex-1 items-center">
-              <Text className="text-foreground font-bold text-lg">{stats.totalSales}</Text>
-              <Text className="text-muted text-sm">Sales</Text>
+              <Text className="text-foreground font-bold text-base">{stats.totalSales}</Text>
+              <Text className="text-muted text-[10px]">Sales</Text>
             </View>
           </View>
         </View>
 
-        {/* Subscription Banner */}
+        {/* Premium Banner */}
         {!isPremium && (
           <TouchableOpacity 
-            className="mx-4 mt-4 p-4 rounded-xl flex-row items-center"
-            style={{ backgroundColor: colors.gold + '20' }}
+            className="mx-4 mt-3 p-4 rounded-2xl flex-row items-center border"
+            style={{ backgroundColor: colors.gold + '20', borderColor: colors.gold + '50' }}
             onPress={() => setShowSubscription(true)}
           >
             <IconSymbol name="crown.fill" size={24} color={colors.gold} />
             <View className="flex-1 ml-3">
-              <Text className="text-foreground font-bold">Upgrade to Premium</Text>
-              <Text className="text-muted text-sm">Unlimited uploads & downloads</Text>
+              <Text className="text-foreground font-bold text-sm">Upgrade to Premium</Text>
+              <Text className="text-muted text-xs">Unlimited uploads & all 20+ mastering presets</Text>
             </View>
             <IconSymbol name="chevron.right" size={20} color={colors.muted} />
           </TouchableOpacity>
         )}
 
-        {/* Earnings Section */}
-        <View className="mx-4 mt-6">
-          <Text className="text-lg font-bold text-foreground mb-3">My Earnings</Text>
-          <View className="p-4 rounded-xl" style={{ backgroundColor: colors.surface }}>
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-muted">Total Earnings</Text>
-              <Text className="text-foreground font-bold text-xl">
+        {/* Earnings Card */}
+        <View className="mx-4 mt-5">
+          <Text className="text-base font-bold text-foreground mb-2">My Artist Earnings</Text>
+          <View className="p-4 rounded-2xl border" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-muted text-xs">Total Earnings</Text>
+              <Text className="text-foreground font-bold text-base">
                 {formatCurrency(stats.totalEarnings)}
               </Text>
             </View>
-            <View className="flex-row items-center justify-between mb-4 pb-4 border-b" style={{ borderBottomColor: colors.border }}>
-              <Text className="text-muted">Available Balance</Text>
-              <Text className="text-success font-bold text-xl">
+            <View className="flex-row items-center justify-between mb-4 pb-3 border-b" style={{ borderBottomColor: colors.border }}>
+              <Text className="text-muted text-xs">Available for Withdrawal</Text>
+              <Text className="text-success font-bold text-base">
                 {formatCurrency(stats.availableBalance)}
               </Text>
             </View>
             <TouchableOpacity 
-              className="py-3 rounded-xl items-center"
+              className="py-3 rounded-xl items-center shadow-sm"
               style={{ backgroundColor: colors.primary }}
-              onPress={() => Alert.alert("Withdraw", "Withdrawal flow would start here")}
+              onPress={handleWithdrawal}
+              disabled={isWithdrawing}
             >
-              <Text className="text-white font-semibold">Withdraw Funds</Text>
+              {isWithdrawing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="text-white font-semibold text-sm">Withdraw via BSP Mobile</Text>
+              )}
             </TouchableOpacity>
-            <Text className="text-muted text-xs text-center mt-2">
-              Minimum withdrawal: K 50.00
+            <Text className="text-muted text-[10px] text-center mt-1.5">
+              Minimum withdrawal: K 50.00 • Direct BSP transfer
             </Text>
           </View>
         </View>
 
-        {/* Menu Items */}
-        <View className="mx-4 mt-6">
-          <Text className="text-lg font-bold text-foreground mb-3">Account</Text>
+        {/* Account Menu */}
+        <View className="mx-4 mt-5">
+          <Text className="text-base font-bold text-foreground mb-2">Account & Settings</Text>
           
           <TouchableOpacity 
-            className="flex-row items-center py-4 border-b"
+            className="flex-row items-center py-3.5 border-b"
             style={{ borderBottomColor: colors.border }}
             onPress={() => router.push("/settings")}
           >
-            <IconSymbol name="gearshape.fill" size={24} color={colors.foreground} />
-            <Text className="flex-1 ml-3 text-foreground">Settings</Text>
-            <IconSymbol name="chevron.right" size={20} color={colors.muted} />
+            <IconSymbol name="gearshape.fill" size={20} color={colors.foreground} />
+            <Text className="flex-1 ml-3 text-foreground text-sm">Settings</Text>
+            <IconSymbol name="chevron.right" size={18} color={colors.muted} />
           </TouchableOpacity>
 
           <TouchableOpacity 
-            className="flex-row items-center py-4 border-b"
+            className="flex-row items-center py-3.5 border-b"
             style={{ borderBottomColor: colors.border }}
             onPress={() => router.push("/about")}
           >
-            <IconSymbol name="info.circle.fill" size={24} color={colors.foreground} />
-            <Text className="flex-1 ml-3 text-foreground">About</Text>
-            <IconSymbol name="chevron.right" size={20} color={colors.muted} />
+            <IconSymbol name="info.circle.fill" size={20} color={colors.foreground} />
+            <Text className="flex-1 ml-3 text-foreground text-sm">About Bilong Yumi</Text>
+            <IconSymbol name="chevron.right" size={18} color={colors.muted} />
           </TouchableOpacity>
 
           <TouchableOpacity 
-            className="flex-row items-center py-4 border-b"
-            style={{ borderBottomColor: colors.border }}
-            onPress={() => router.push("/terms")}
-          >
-            <IconSymbol name="doc.text.fill" size={24} color={colors.foreground} />
-            <Text className="flex-1 ml-3 text-foreground">Terms & Conditions</Text>
-            <IconSymbol name="chevron.right" size={20} color={colors.muted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            className="flex-row items-center py-4 border-b"
-            style={{ borderBottomColor: colors.border }}
-            onPress={() => router.push("/privacy")}
-          >
-            <IconSymbol name="shield.fill" size={24} color={colors.foreground} />
-            <Text className="flex-1 ml-3 text-foreground">Privacy Policy</Text>
-            <IconSymbol name="chevron.right" size={20} color={colors.muted} />
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            className="flex-row items-center py-4"
+            className="flex-row items-center py-3.5"
             onPress={handleLogout}
           >
-            <IconSymbol name="chevron.left" size={24} color={colors.error} />
-            <Text className="flex-1 ml-3" style={{ color: colors.error }}>Logout</Text>
+            <IconSymbol name="chevron.left" size={20} color={colors.error} />
+            <Text className="flex-1 ml-3 text-sm font-semibold" style={{ color: colors.error }}>Log Out</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Support Section */}
-        <View className="mx-4 mt-6 p-4 rounded-xl" style={{ backgroundColor: colors.gold + '15' }}>
-          <Text className="text-foreground font-bold mb-2">Support PNG Music</Text>
-          <Text className="text-muted text-sm mb-3">
-            Help us grow the PNG music industry by donating to the platform
-          </Text>
-          <View className="flex-row items-center">
-            <IconSymbol name="banknote.fill" size={20} color={colors.gold} />
-            <Text className="text-foreground ml-2">
-              BSP Account: <Text className="font-bold">{CONTACT_INFO.bspAccount}</Text>
-            </Text>
-          </View>
-        </View>
-
-        {/* Contact */}
-        <View className="mx-4 mt-6 mb-4">
-          <Text className="text-lg font-bold text-foreground mb-3">Contact Us</Text>
-          <View className="flex-row flex-wrap gap-2">
-            <TouchableOpacity 
-              className="flex-row items-center px-4 py-2 rounded-full"
-              style={{ backgroundColor: colors.surface }}
-              onPress={() => openLink(`https://wa.me/${CONTACT_INFO.whatsapp.replace(/\s/g, '')}`)}
-            >
-              <Text className="text-foreground">WhatsApp</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              className="flex-row items-center px-4 py-2 rounded-full"
-              style={{ backgroundColor: colors.surface }}
-              onPress={() => openLink(`mailto:${CONTACT_INFO.email}`)}
-            >
-              <Text className="text-foreground">Email</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              className="flex-row items-center px-4 py-2 rounded-full"
-              style={{ backgroundColor: colors.surface }}
-              onPress={() => openLink(`https://facebook.com/${CONTACT_INFO.facebook.replace(/\s/g, '')}`)}
-            >
-              <Text className="text-foreground">Facebook</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </ScreenContainer>

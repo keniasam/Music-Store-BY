@@ -5,20 +5,26 @@ import type { TrpcContext } from "../server/_core/context";
 
 type CookieCall = {
   name: string;
+  value?: string;
   options: Record<string, unknown>;
 };
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
-function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] } {
+function createAuthContext(userOverride?: AuthenticatedUser | null): { 
+  ctx: TrpcContext; 
+  clearedCookies: CookieCall[];
+  setCookies: CookieCall[];
+} {
   const clearedCookies: CookieCall[] = [];
+  const setCookies: CookieCall[] = [];
   
-  const user: AuthenticatedUser = {
+  const user: AuthenticatedUser = userOverride !== undefined ? userOverride! : {
     id: 1,
     openId: "sample-user",
     email: "sample@example.com",
     name: "Sample User",
-    loginMethod: "manus",
+    loginMethod: "local",
     role: "user",
     avatarUrl: null,
     bio: null,
@@ -43,19 +49,22 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
     req: {
       protocol: "https",
       headers: {},
-    } as TrpcContext["req"],
+      hostname: "localhost",
+    } as unknown as TrpcContext["req"],
     res: {
       clearCookie: (name: string, options: Record<string, unknown>) => {
         clearedCookies.push({ name, options });
       },
-    } as TrpcContext["res"],
+      cookie: (name: string, value: string, options: Record<string, unknown>) => {
+        setCookies.push({ name, value, options });
+      },
+    } as unknown as TrpcContext["res"],
   };
   
-  return { ctx, clearedCookies };
+  return { ctx, clearedCookies, setCookies };
 }
 
-// TODO: Remove `.skip` below once you implement user authentication
-describe.skip("auth.logout", () => {
+describe("auth.logout", () => {
   it("clears the session cookie and reports success", async () => {
     const { ctx, clearedCookies } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
@@ -72,5 +81,64 @@ describe.skip("auth.logout", () => {
       httpOnly: true,
       path: "/",
     });
+  });
+});
+
+describe("auth local flows", () => {
+  it("registers a new user and sets session cookie", async () => {
+    const { ctx, setCookies } = createAuthContext(null);
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.auth.register({
+      email: "testartist@pngmusic.com",
+      password: "password123",
+      name: "Test PNG Artist",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.user.email).toBe("testartist@pngmusic.com");
+    expect(result.user.name).toBe("Test PNG Artist");
+    expect(result.token).toBeDefined();
+    expect(setCookies).toHaveLength(1);
+    expect(setCookies[0]?.name).toBe(COOKIE_NAME);
+  });
+
+  it("logs in an existing or new user", async () => {
+    const { ctx, setCookies } = createAuthContext(null);
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.auth.login({
+      email: "testartist@pngmusic.com",
+      password: "password123",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.token).toBeDefined();
+    expect(setCookies).toHaveLength(1);
+  });
+
+  it("performs 1-click demo artist login", async () => {
+    const { ctx, setCookies } = createAuthContext(null);
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.auth.demoLogin({ role: "artist" });
+
+    expect(result.success).toBe(true);
+    expect(result.user?.name).toBe("Justin Wellington");
+    expect(result.token).toBeDefined();
+    expect(setCookies).toHaveLength(1);
+  });
+});
+
+describe("tracks API fallback store", () => {
+  it("returns trending tracks from fallback memory store", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const trending = await caller.tracks.getTrending({ limit: 5 });
+
+    expect(trending.length).toBeGreaterThan(0);
+    expect(trending[0]?.title).toBe("Wantok Musik");
+    expect(trending[0]?.genre).toBe("Reggae");
   });
 });

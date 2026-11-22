@@ -1,4 +1,4 @@
-import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
 
@@ -6,13 +6,15 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
+import { trpc } from "@/lib/trpc";
+import * as Auth from "@/lib/_core/auth";
 
 type AuthMode = "login" | "register";
 
 export default function LoginScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { refresh, loading: isLoading } = useAuth();
+  const { refresh } = useAuth();
   
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -20,6 +22,11 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const registerMutation = trpc.auth.register.useMutation();
+  const loginMutation = trpc.auth.login.useMutation();
+  const demoLoginMutation = trpc.auth.demoLogin.useMutation();
 
   const handleSubmit = async () => {
     if (!email.trim()) {
@@ -45,11 +52,75 @@ export default function LoginScreen() {
       }
     }
 
+    setIsSubmitting(true);
     try {
+      if (mode === "register") {
+        const res = await registerMutation.mutateAsync({
+          email: email.trim(),
+          password: password.trim(),
+          name: name.trim(),
+        });
+        if (res.token && res.user) {
+          await Auth.setSessionToken(res.token);
+          await Auth.setUserInfo({
+            id: res.user.id,
+            openId: res.user.openId,
+            name: res.user.name,
+            email: res.user.email,
+            loginMethod: res.user.loginMethod,
+            lastSignedIn: new Date(res.user.lastSignedIn),
+          });
+        }
+      } else {
+        const res = await loginMutation.mutateAsync({
+          email: email.trim(),
+          password: password.trim(),
+        });
+        if (res.token && res.user) {
+          await Auth.setSessionToken(res.token);
+          await Auth.setUserInfo({
+            id: res.user.id,
+            openId: res.user.openId,
+            name: res.user.name,
+            email: res.user.email,
+            loginMethod: res.user.loginMethod,
+            lastSignedIn: new Date(res.user.lastSignedIn),
+          });
+        }
+      }
+
       await refresh();
       router.replace("/(tabs)");
-    } catch (error) {
-      Alert.alert("Error", "Authentication failed. Please try again.");
+    } catch (error: any) {
+      console.error("[Login] Auth error:", error);
+      Alert.alert("Authentication Failed", error?.message || "Please check your credentials and try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDemoLogin = async (role: "artist" | "listener") => {
+    setIsSubmitting(true);
+    try {
+      const res = await demoLoginMutation.mutateAsync({ role });
+      if (res.token && res.user) {
+        await Auth.setSessionToken(res.token);
+        await Auth.setUserInfo({
+          id: res.user.id,
+          openId: res.user.openId,
+          name: res.user.name,
+          email: res.user.email,
+          loginMethod: res.user.loginMethod,
+          lastSignedIn: new Date(res.user.lastSignedIn),
+        });
+      }
+      await refresh();
+      router.replace("/(tabs)");
+    } catch (err: any) {
+      console.error("[Login] Demo login error:", err);
+      Alert.alert("Demo Login Failed", err?.message || "Could not log in as demo user");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -71,19 +142,50 @@ export default function LoginScreen() {
         </View>
 
         {/* Logo */}
-        <View className="items-center mt-8 mb-8">
+        <View className="items-center mt-6 mb-6">
           <View 
-            className="w-24 h-24 rounded-2xl items-center justify-center"
+            className="w-20 h-20 rounded-2xl items-center justify-center"
             style={{ backgroundColor: colors.primary }}
           >
-            <IconSymbol name="music.note" size={48} color="#fff" />
+            <IconSymbol name="music.note" size={40} color="#fff" />
           </View>
-          <Text className="text-xl font-bold text-foreground mt-4">
+          <Text className="text-xl font-bold text-foreground mt-3">
             Music Store Bilong Yumi
           </Text>
           <Text className="text-muted">
             {mode === "login" ? "Welcome back!" : "Join the PNG music community"}
           </Text>
+        </View>
+
+        {/* Demo 1-Click Access Card */}
+        <View className="mx-4 mb-6 p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+          <Text className="text-foreground font-bold mb-1">Instant Demo Access</Text>
+          <Text className="text-muted text-xs mb-3">
+            Test the platform instantly with pre-configured accounts:
+          </Text>
+          <View className="flex-row gap-2">
+            <TouchableOpacity 
+              className="flex-1 py-2.5 px-3 rounded-xl flex-row items-center justify-center"
+              style={{ backgroundColor: colors.primary }}
+              onPress={() => handleDemoLogin("artist")}
+              disabled={isSubmitting}
+            >
+              <IconSymbol name="music.note" size={16} color="#fff" />
+              <Text className="text-white font-semibold text-xs ml-1.5">Demo Artist</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              className="flex-1 py-2.5 px-3 rounded-xl flex-row items-center justify-center border"
+              style={{ borderColor: colors.primary }}
+              onPress={() => handleDemoLogin("listener")}
+              disabled={isSubmitting}
+            >
+              <IconSymbol name="person.fill" size={16} color={colors.primary} />
+              <Text className="font-semibold text-xs ml-1.5" style={{ color: colors.primary }}>
+                Demo Listener
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Form */}
@@ -98,7 +200,7 @@ export default function LoginScreen() {
                 <IconSymbol name="person.fill" size={20} color={colors.muted} />
                 <TextInput
                   className="flex-1 ml-3"
-                  placeholder="Enter your name"
+                  placeholder="e.g. Justin Wellington"
                   placeholderTextColor={colors.muted}
                   value={name}
                   onChangeText={setName}
@@ -118,7 +220,7 @@ export default function LoginScreen() {
               <IconSymbol name="envelope.fill" size={20} color={colors.muted} />
               <TextInput
                 className="flex-1 ml-3"
-                placeholder="Enter your email"
+                placeholder="your.email@example.com"
                 placeholderTextColor={colors.muted}
                 value={email}
                 onChangeText={setEmail}
@@ -139,7 +241,7 @@ export default function LoginScreen() {
               <IconSymbol name="lock.fill" size={20} color={colors.muted} />
               <TextInput
                 className="flex-1 ml-3"
-                placeholder="Enter your password"
+                placeholder="Enter password (min 6 characters)"
                 placeholderTextColor={colors.muted}
                 value={password}
                 onChangeText={setPassword}
@@ -179,57 +281,27 @@ export default function LoginScreen() {
             </View>
           )}
 
-          {mode === "login" && (
-            <TouchableOpacity className="mb-4 self-end">
-              <Text className="text-primary font-medium">Forgot Password?</Text>
-            </TouchableOpacity>
-          )}
-
           {/* Submit Button */}
           <TouchableOpacity 
-            className="py-4 rounded-xl items-center mt-4"
+            className="py-4 rounded-xl items-center mt-3"
             style={{ 
-              backgroundColor: isLoading ? colors.muted : colors.primary,
-              opacity: isLoading ? 0.7 : 1,
+              backgroundColor: isSubmitting ? colors.muted : colors.primary,
+              opacity: isSubmitting ? 0.7 : 1,
             }}
             onPress={handleSubmit}
-            disabled={isLoading}
+            disabled={isSubmitting}
           >
-            <Text className="text-white font-bold text-lg">
-              {isLoading ? "Please wait..." : (mode === "login" ? "Login" : "Create Account")}
-            </Text>
+            {isSubmitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text className="text-white font-bold text-lg">
+                {mode === "login" ? "Login" : "Create Account"}
+              </Text>
+            )}
           </TouchableOpacity>
 
-          {/* Divider */}
-          <View className="flex-row items-center my-6">
-            <View className="flex-1 h-px" style={{ backgroundColor: colors.border }} />
-            <Text className="mx-4 text-muted">or continue with</Text>
-            <View className="flex-1 h-px" style={{ backgroundColor: colors.border }} />
-          </View>
-
-          {/* Social Login */}
-          <View className="flex-row gap-3">
-            <TouchableOpacity 
-              className="flex-1 flex-row items-center justify-center py-3 rounded-xl"
-              style={{ backgroundColor: colors.surface }}
-              onPress={() => Alert.alert("Google", "Google login would start here")}
-            >
-              <IconSymbol name="globe" size={24} color={colors.foreground} />
-              <Text className="text-foreground font-medium ml-2">Google</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              className="flex-1 flex-row items-center justify-center py-3 rounded-xl"
-              style={{ backgroundColor: colors.surface }}
-              onPress={() => Alert.alert("Facebook", "Facebook login would start here")}
-            >
-              <IconSymbol name="person.2.fill" size={24} color={colors.foreground} />
-              <Text className="text-foreground font-medium ml-2">Facebook</Text>
-            </TouchableOpacity>
-          </View>
-
           {/* Switch Mode */}
-          <View className="flex-row items-center justify-center mt-8">
+          <View className="flex-row items-center justify-center mt-6">
             <Text className="text-muted">
               {mode === "login" ? "Don't have an account?" : "Already have an account?"}
             </Text>
@@ -242,26 +314,6 @@ export default function LoginScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-
-          {/* Terms */}
-          {mode === "register" && (
-            <Text className="text-muted text-center text-sm mt-4">
-              By creating an account, you agree to our{" "}
-              <Text 
-                className="text-primary"
-                onPress={() => router.push("/terms")}
-              >
-                Terms & Conditions
-              </Text>
-              {" "}and{" "}
-              <Text 
-                className="text-primary"
-                onPress={() => router.push("/privacy")}
-              >
-                Privacy Policy
-              </Text>
-            </Text>
-          )}
         </View>
       </ScrollView>
     </ScreenContainer>

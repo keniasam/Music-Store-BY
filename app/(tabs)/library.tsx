@@ -1,4 +1,4 @@
-import { ScrollView, Text, View, TouchableOpacity, FlatList } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
 
@@ -6,37 +6,17 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { useAuth } from "@/hooks/use-auth";
+import { useAudioPlayer } from "@/lib/audio-player-context";
+import { trpc } from "@/lib/trpc";
 import { formatCurrency, formatNumber, APP_CONFIG } from "@/shared/config";
 
 type LibraryTab = "uploads" | "purchases" | "downloads" | "liked";
-
-// Demo data
-const MY_UPLOADS = [
-  { id: 1, title: "My First Song", status: "published", plays: 1250, earnings: "45.00" },
-  { id: 2, title: "Island Dreams", status: "draft", plays: 0, earnings: "0.00" },
-  { id: 3, title: "PNG Pride", status: "published", plays: 890, earnings: "32.50" },
-];
-
-const MY_PURCHASES = [
-  { id: 1, title: "Wantok Musik", artist: "PNG Stars", price: "5.00", purchaseDate: "2025-01-03" },
-  { id: 2, title: "Highlands Love", artist: "Mountain Voice", price: "3.50", purchaseDate: "2025-01-01" },
-];
-
-const MY_DOWNLOADS = [
-  { id: 1, title: "Wantok Musik", artist: "PNG Stars", downloadDate: "2025-01-03" },
-  { id: 2, title: "Highlands Love", artist: "Mountain Voice", downloadDate: "2025-01-01" },
-];
-
-const MY_LIKED = [
-  { id: 1, title: "Paradise Vibes", artist: "Island Beats", plays: 12300 },
-  { id: 2, title: "Morobe Dreams", artist: "Coastal Crew", plays: 8500 },
-  { id: 3, title: "Port Moresby Nights", artist: "City Sounds", plays: 7200 },
-];
 
 export default function LibraryScreen() {
   const colors = useColors();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
+  const { currentTrack, isPlaying, playTrack, togglePlayPause } = useAudioPlayer();
   const [activeTab, setActiveTab] = useState<LibraryTab>("uploads");
 
   const tabs: { id: LibraryTab; label: string; icon: any }[] = [
@@ -46,8 +26,48 @@ export default function LibraryScreen() {
     { id: "liked", label: "Liked", icon: "heart.fill" },
   ];
 
-  const isPremium = false; // Subscription feature
-  const downloadsRemaining = isPremium ? -1 : APP_CONFIG.freeDownloadLimit;
+  // Queries
+  const { data: userTracks, isLoading: isTracksLoading } = trpc.tracks.getUserTracks.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  const { data: userPurchases, isLoading: isPurchasesLoading } = trpc.purchases.getUserPurchases.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  const { data: userDownloads, isLoading: isDownloadsLoading } = trpc.downloads.getUserDownloads.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  const { data: userLikes, isLoading: isLikesLoading } = trpc.likes.getUserLikes.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  const isPremium = user?.subscriptionTier === "premium";
+  const downloadsRemaining = isPremium ? -1 : Math.max(0, APP_CONFIG.freeDownloadLimit - (user?.downloadCount || 0));
+
+  const handlePlay = (track: any) => {
+    if (!track.audioUrl) return;
+    if (currentTrack?.id === track.id) {
+      togglePlayPause();
+    } else {
+      playTrack({
+        id: track.id,
+        title: track.title,
+        artist: track.artist || "My Song",
+        genre: track.genre,
+        duration: track.duration,
+        audioUrl: track.audioUrl,
+        coverUrl: track.coverUrl,
+        price: track.price,
+        isFree: track.isFree,
+      });
+    }
+  };
 
   if (!isAuthenticated) {
     return (
@@ -62,14 +82,14 @@ export default function LibraryScreen() {
           Your Music Library
         </Text>
         <Text className="text-muted text-center mb-6">
-          Login to access your uploads, purchases, downloads, and liked tracks
+          Log in to access your uploads, purchases, downloads, and liked tracks
         </Text>
         <TouchableOpacity 
-          className="px-8 py-3 rounded-full"
+          className="px-8 py-3.5 rounded-full"
           style={{ backgroundColor: colors.primary }}
           onPress={() => router.push("/login")}
         >
-          <Text className="text-white font-semibold text-lg">Login</Text>
+          <Text className="text-white font-semibold text-base">Login to Bilong Yumi</Text>
         </TouchableOpacity>
       </ScreenContainer>
     );
@@ -80,32 +100,33 @@ export default function LibraryScreen() {
       {/* Header */}
       <View className="px-4 pt-4 pb-2">
         <Text className="text-2xl font-bold text-foreground">Library</Text>
-        <Text className="text-muted">Your music collection</Text>
+        <Text className="text-muted">Your music collection & creations</Text>
       </View>
 
       {/* Tab Bar */}
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
-        className="px-4 mt-4"
+        className="px-4 mt-3"
         contentContainerStyle={{ gap: 8 }}
       >
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab.id}
-            className="flex-row items-center px-4 py-2 rounded-full"
+            className="flex-row items-center px-4 py-2 rounded-full border"
             style={{ 
               backgroundColor: activeTab === tab.id ? colors.primary : colors.surface,
+              borderColor: activeTab === tab.id ? colors.primary : colors.border,
             }}
             onPress={() => setActiveTab(tab.id)}
           >
             <IconSymbol 
               name={tab.icon} 
-              size={18} 
+              size={16} 
               color={activeTab === tab.id ? '#fff' : colors.muted} 
             />
             <Text 
-              className="ml-2 font-medium"
+              className="ml-2 font-semibold text-xs"
               style={{ color: activeTab === tab.id ? '#fff' : colors.foreground }}
             >
               {tab.label}
@@ -116,16 +137,16 @@ export default function LibraryScreen() {
 
       {/* Downloads Status */}
       {activeTab === "downloads" && (
-        <View className="mx-4 mt-4 p-3 rounded-xl" style={{ backgroundColor: colors.surface }}>
+        <View className="mx-4 mt-4 p-3 rounded-2xl border" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
           <View className="flex-row items-center justify-between">
-            <Text className="text-foreground font-semibold">Downloads</Text>
+            <Text className="text-foreground font-semibold text-sm">Downloads Quota</Text>
             {isPremium ? (
               <View className="flex-row items-center">
                 <IconSymbol name="crown.fill" size={16} color={colors.gold} />
-                <Text className="text-gold ml-1 font-semibold">Unlimited</Text>
+                <Text className="text-gold ml-1 font-semibold text-xs">Unlimited</Text>
               </View>
             ) : (
-              <Text className="text-muted">
+              <Text className="text-muted text-xs">
                 {downloadsRemaining} of {APP_CONFIG.freeDownloadLimit} remaining
               </Text>
             )}
@@ -136,41 +157,47 @@ export default function LibraryScreen() {
       {/* Content */}
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100, paddingTop: 16 }}
+        contentContainerStyle={{ paddingBottom: 110, paddingTop: 14 }}
       >
         {/* Uploads Tab */}
         {activeTab === "uploads" && (
           <View className="px-4">
-            {MY_UPLOADS.length === 0 ? (
+            {isTracksLoading ? (
+              <ActivityIndicator color={colors.primary} className="my-8" />
+            ) : !userTracks || userTracks.length === 0 ? (
               <View className="items-center py-12">
                 <IconSymbol name="music.note" size={48} color={colors.muted} />
                 <Text className="text-foreground font-semibold mt-4">No uploads yet</Text>
-                <Text className="text-muted text-center mt-1">
-                  Start creating and sharing your music
+                <Text className="text-muted text-xs text-center mt-1">
+                  Start sharing your music with PNG fans
                 </Text>
                 <TouchableOpacity 
-                  className="mt-4 px-6 py-2 rounded-full"
+                  className="mt-4 px-6 py-2.5 rounded-full"
                   style={{ backgroundColor: colors.primary }}
                   onPress={() => router.push("/(tabs)/create")}
                 >
-                  <Text className="text-white font-semibold">Upload Music</Text>
+                  <Text className="text-white font-semibold text-sm">Upload Music</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              MY_UPLOADS.map((track) => (
+              userTracks.map((track) => (
                 <View 
                   key={track.id}
                   className="flex-row items-center py-3 border-b"
                   style={{ borderBottomColor: colors.border }}
                 >
-                  <View 
-                    className="w-14 h-14 rounded-lg items-center justify-center mr-3"
+                  <TouchableOpacity 
+                    onPress={() => router.push(`/track/${track.id}` as any)}
+                    className="w-12 h-12 rounded-xl items-center justify-center mr-3"
                     style={{ backgroundColor: colors.primary + '20' }}
                   >
-                    <IconSymbol name="music.note" size={24} color={colors.primary} />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-foreground font-semibold" numberOfLines={1}>
+                    <IconSymbol name="music.note" size={22} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    onPress={() => router.push(`/track/${track.id}` as any)}
+                    className="flex-1 mr-2"
+                  >
+                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
                       {track.title}
                     </Text>
                     <View className="flex-row items-center mt-1">
@@ -181,21 +208,26 @@ export default function LibraryScreen() {
                         }}
                       >
                         <Text 
-                          className="text-xs font-medium"
+                          className="text-[10px] font-bold"
                           style={{ color: track.status === "published" ? colors.success : colors.warning }}
                         >
                           {track.status.toUpperCase()}
                         </Text>
                       </View>
-                      <Text className="text-muted text-xs">{formatNumber(track.plays)} plays</Text>
+                      <Text className="text-muted text-xs">{formatNumber(track.playCount)} plays</Text>
                     </View>
-                  </View>
-                  <View className="items-end">
-                    <Text className="text-success font-semibold">
-                      {formatCurrency(track.earnings)}
-                    </Text>
-                    <Text className="text-muted text-xs">earned</Text>
-                  </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    onPress={() => handlePlay(track)}
+                    className="w-9 h-9 rounded-full items-center justify-center ml-2"
+                    style={{ backgroundColor: colors.primary + '20' }}
+                  >
+                    <IconSymbol 
+                      name={currentTrack?.id === track.id && isPlaying ? "pause.fill" : "play.fill"} 
+                      size={16} 
+                      color={colors.primary} 
+                    />
+                  </TouchableOpacity>
                 </View>
               ))
             )}
@@ -205,50 +237,46 @@ export default function LibraryScreen() {
         {/* Purchases Tab */}
         {activeTab === "purchases" && (
           <View className="px-4">
-            {MY_PURCHASES.length === 0 ? (
+            {isPurchasesLoading ? (
+              <ActivityIndicator color={colors.primary} className="my-8" />
+            ) : !userPurchases || userPurchases.length === 0 ? (
               <View className="items-center py-12">
                 <IconSymbol name="banknote.fill" size={48} color={colors.muted} />
                 <Text className="text-foreground font-semibold mt-4">No purchases yet</Text>
-                <Text className="text-muted text-center mt-1">
-                  Discover and buy amazing PNG music
+                <Text className="text-muted text-xs text-center mt-1">
+                  Discover and support great PNG music
                 </Text>
                 <TouchableOpacity 
-                  className="mt-4 px-6 py-2 rounded-full"
+                  className="mt-4 px-6 py-2.5 rounded-full"
                   style={{ backgroundColor: colors.primary }}
                   onPress={() => router.push("/(tabs)/discover")}
                 >
-                  <Text className="text-white font-semibold">Discover Music</Text>
+                  <Text className="text-white font-semibold text-sm">Discover Music</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              MY_PURCHASES.map((track) => (
+              userPurchases.map((purchase) => (
                 <View 
-                  key={track.id}
+                  key={purchase.id}
                   className="flex-row items-center py-3 border-b"
                   style={{ borderBottomColor: colors.border }}
                 >
                   <View 
-                    className="w-14 h-14 rounded-lg items-center justify-center mr-3"
+                    className="w-12 h-12 rounded-xl items-center justify-center mr-3"
                     style={{ backgroundColor: colors.gold + '20' }}
                   >
-                    <IconSymbol name="music.note" size={24} color={colors.gold} />
+                    <IconSymbol name="banknote.fill" size={20} color={colors.gold} />
                   </View>
                   <View className="flex-1">
-                    <Text className="text-foreground font-semibold" numberOfLines={1}>
-                      {track.title}
+                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
+                      Purchase #{purchase.id}
                     </Text>
-                    <Text className="text-muted text-sm">{track.artist}</Text>
-                    <Text className="text-muted text-xs mt-1">
-                      Purchased {track.purchaseDate}
+                    <Text className="text-muted text-xs">
+                      Paid: {formatCurrency(purchase.amount)} via {purchase.paymentMethod}
                     </Text>
-                  </View>
-                  <View className="items-end">
-                    <Text className="text-primary font-semibold">
-                      {formatCurrency(track.price)}
+                    <Text className="text-muted text-[10px] mt-0.5">
+                      {new Date(purchase.createdAt).toLocaleDateString()} • {purchase.paymentStatus.toUpperCase()}
                     </Text>
-                    <TouchableOpacity className="mt-1">
-                      <IconSymbol name="arrow.down.circle.fill" size={24} color={colors.success} />
-                    </TouchableOpacity>
                   </View>
                 </View>
               ))
@@ -259,39 +287,46 @@ export default function LibraryScreen() {
         {/* Downloads Tab */}
         {activeTab === "downloads" && (
           <View className="px-4">
-            {MY_DOWNLOADS.length === 0 ? (
+            {isDownloadsLoading ? (
+              <ActivityIndicator color={colors.primary} className="my-8" />
+            ) : !userDownloads || userDownloads.length === 0 ? (
               <View className="items-center py-12">
                 <IconSymbol name="arrow.down.circle.fill" size={48} color={colors.muted} />
                 <Text className="text-foreground font-semibold mt-4">No downloads yet</Text>
-                <Text className="text-muted text-center mt-1">
-                  Download purchased tracks to listen offline
+                <Text className="text-muted text-xs text-center mt-1">
+                  Download free or purchased tracks to listen offline
                 </Text>
               </View>
             ) : (
-              MY_DOWNLOADS.map((track) => (
+              userDownloads.map((download) => (
                 <View 
-                  key={track.id}
+                  key={download.id}
                   className="flex-row items-center py-3 border-b"
                   style={{ borderBottomColor: colors.border }}
                 >
                   <View 
-                    className="w-14 h-14 rounded-lg items-center justify-center mr-3"
+                    className="w-12 h-12 rounded-xl items-center justify-center mr-3"
                     style={{ backgroundColor: colors.success + '20' }}
                   >
-                    <IconSymbol name="checkmark.circle.fill" size={24} color={colors.success} />
+                    <IconSymbol name="checkmark.circle.fill" size={22} color={colors.success} />
                   </View>
                   <View className="flex-1">
-                    <Text className="text-foreground font-semibold" numberOfLines={1}>
-                      {track.title}
+                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
+                      Downloaded Track #{download.trackId}
                     </Text>
-                    <Text className="text-muted text-sm">{track.artist}</Text>
-                    <Text className="text-muted text-xs mt-1">
-                      Downloaded {track.downloadDate}
+                    <Text className="text-muted text-xs mt-0.5">
+                      Downloaded {new Date(download.downloadedAt).toLocaleDateString()}
                     </Text>
                   </View>
-                  <TouchableOpacity>
-                    <IconSymbol name="play.fill" size={24} color={colors.primary} />
-                  </TouchableOpacity>
+                  {download.trackId && (
+                    <TouchableOpacity 
+                      onPress={() => router.push(`/track/${download.trackId}` as any)}
+                      className="px-3 py-1.5 rounded-full"
+                      style={{ backgroundColor: colors.primary }}
+                    >
+                      <Text className="text-white text-xs font-semibold">Open</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             )}
@@ -301,45 +336,50 @@ export default function LibraryScreen() {
         {/* Liked Tab */}
         {activeTab === "liked" && (
           <View className="px-4">
-            {MY_LIKED.length === 0 ? (
+            {isLikesLoading ? (
+              <ActivityIndicator color={colors.primary} className="my-8" />
+            ) : !userLikes || userLikes.length === 0 ? (
               <View className="items-center py-12">
                 <IconSymbol name="heart.fill" size={48} color={colors.muted} />
                 <Text className="text-foreground font-semibold mt-4">No liked tracks</Text>
-                <Text className="text-muted text-center mt-1">
-                  Like tracks to save them here
+                <Text className="text-muted text-xs text-center mt-1">
+                  Like tracks on Home or Discover to save them here
                 </Text>
               </View>
             ) : (
-              MY_LIKED.map((track) => (
-                <View 
+              userLikes.map((track) => (
+                <TouchableOpacity 
                   key={track.id}
                   className="flex-row items-center py-3 border-b"
                   style={{ borderBottomColor: colors.border }}
+                  onPress={() => router.push(`/track/${track.id}` as any)}
                 >
                   <View 
-                    className="w-14 h-14 rounded-lg items-center justify-center mr-3"
+                    className="w-12 h-12 rounded-xl items-center justify-center mr-3"
                     style={{ backgroundColor: colors.primary + '20' }}
                   >
-                    <IconSymbol name="music.note" size={24} color={colors.primary} />
+                    <IconSymbol name="music.note" size={20} color={colors.primary} />
                   </View>
-                  <View className="flex-1">
-                    <Text className="text-foreground font-semibold" numberOfLines={1}>
+                  <View className="flex-1 mr-2">
+                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
                       {track.title}
                     </Text>
-                    <Text className="text-muted text-sm">{track.artist}</Text>
-                    <Text className="text-muted text-xs mt-1">
-                      {formatNumber(track.plays)} plays
+                    <Text className="text-muted text-xs mt-0.5">
+                      {track.genre || "PNG Music"} • {formatNumber(track.playCount)} plays
                     </Text>
                   </View>
-                  <View className="flex-row items-center">
-                    <TouchableOpacity className="mr-3">
-                      <IconSymbol name="heart.fill" size={24} color={colors.primary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity>
-                      <IconSymbol name="play.fill" size={24} color={colors.foreground} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                  <TouchableOpacity 
+                    onPress={() => handlePlay(track)}
+                    className="w-9 h-9 rounded-full items-center justify-center ml-2"
+                    style={{ backgroundColor: colors.primary + '20' }}
+                  >
+                    <IconSymbol 
+                      name={currentTrack?.id === track.id && isPlaying ? "pause.fill" : "play.fill"} 
+                      size={16} 
+                      color={colors.primary} 
+                    />
+                  </TouchableOpacity>
+                </TouchableOpacity>
               ))
             )}
           </View>

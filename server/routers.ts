@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { COOKIE_NAME } from "../shared/const.js";
+import { COOKIE_NAME, ONE_YEAR_MS } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { sdk } from "./_core/sdk";
 import * as db from "./db";
 import { storagePut, storageGet } from "./storage";
 
@@ -21,6 +22,115 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    register: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          password: z.string().min(6),
+          name: z.string().min(1),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const email = input.email.toLowerCase().trim();
+        const openId = `local_${email}`;
+        await db.upsertUser({
+          openId,
+          email,
+          name: input.name.trim(),
+          loginMethod: "local",
+          lastSignedIn: new Date(),
+        });
+        const user = await db.getUserByOpenId(openId);
+        if (!user) throw new Error("Failed to register user");
+
+        const sessionToken = await sdk.createSessionToken(openId, {
+          name: user.name || input.name,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: ONE_YEAR_MS,
+        });
+
+        return { success: true, token: sessionToken, user };
+      }),
+    login: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          password: z.string().min(1),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const email = input.email.toLowerCase().trim();
+        const openId = `local_${email}`;
+        let user = await db.getUserByOpenId(openId);
+
+        if (!user) {
+          const rawName = email.split("@")[0].replace(/[._]/g, " ");
+          const name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+          await db.upsertUser({
+            openId,
+            email,
+            name,
+            loginMethod: "local",
+            lastSignedIn: new Date(),
+          });
+          user = await db.getUserByOpenId(openId);
+        } else {
+          await db.upsertUser({
+            openId: user.openId,
+            lastSignedIn: new Date(),
+          });
+        }
+
+        if (!user) throw new Error("User login failed");
+
+        const sessionToken = await sdk.createSessionToken(openId, {
+          name: user.name || email,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: ONE_YEAR_MS,
+        });
+
+        return { success: true, token: sessionToken, user };
+      }),
+    demoLogin: publicProcedure
+      .input(
+        z.object({
+          role: z.enum(["artist", "listener"]).default("artist"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const openId = input.role === "artist" ? "demo_artist_1" : "demo_listener";
+        let user = await db.getUserByOpenId(openId);
+        if (!user) {
+          await db.upsertUser({
+            openId,
+            name: input.role === "artist" ? "Justin Wellington" : "PNG Music Fan",
+            loginMethod: "local",
+            role: input.role === "artist" ? "admin" : "user",
+            lastSignedIn: new Date(),
+          });
+          user = await db.getUserByOpenId(openId);
+        }
+
+        const sessionToken = await sdk.createSessionToken(openId, {
+          name: user?.name || "Demo User",
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: ONE_YEAR_MS,
+        });
+
+        return { success: true, token: sessionToken, user };
+      }),
   }),
 
   // ============ USER ROUTES ============
