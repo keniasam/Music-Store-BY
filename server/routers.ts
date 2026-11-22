@@ -261,7 +261,13 @@ export const appRouter = router({
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
-        return db.getTrackById(input.id);
+        const track = await db.getTrackById(input.id);
+        if (!track) return null;
+        const waveform = db.generateTrackWaveform(input.id);
+        return {
+          ...track,
+          waveform,
+        };
       }),
     
     getUserTracks: protectedProcedure.query(async ({ ctx }) => {
@@ -316,7 +322,7 @@ export const appRouter = router({
         trackId: z.number().optional(),
         albumId: z.number().optional(),
         productId: z.number().optional(),
-        paymentMethod: z.enum(["paypal", "stripe", "phone_banking"]),
+        paymentMethod: z.enum(["paypal", "stripe", "phone_banking", "bsp_mobile", "cellmoni"]),
       }))
       .mutation(async ({ ctx, input }) => {
         let amount = "0.00";
@@ -334,6 +340,11 @@ export const appRouter = router({
         const platformFee = (amountNum * PLATFORM_FEE_PERCENT / 100).toFixed(2);
         const sellerAmount = (amountNum - parseFloat(platformFee)).toFixed(2);
         
+        const effectivePaymentMethod: "paypal" | "stripe" | "phone_banking" =
+          input.paymentMethod === "bsp_mobile" || input.paymentMethod === "cellmoni"
+            ? "phone_banking"
+            : input.paymentMethod;
+
         const purchaseId = await db.createPurchase({
           buyerId: ctx.user.id,
           sellerId,
@@ -344,7 +355,7 @@ export const appRouter = router({
           platformFee,
           sellerAmount,
           currency: "PGK",
-          paymentMethod: input.paymentMethod,
+          paymentMethod: effectivePaymentMethod,
           paymentStatus: "pending",
         });
         
@@ -359,6 +370,56 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         await db.updatePurchaseStatus(input.purchaseId, "completed", input.transactionId);
         return { success: true };
+      }),
+
+    verifyPayment: protectedProcedure
+      .input(z.object({
+        purchaseId: z.number(),
+        transactionReference: z.string().min(3, "Transaction reference required"),
+        paymentMethod: z.enum(["bsp_mobile", "cellmoni", "phone_banking", "paypal", "stripe"]).default("bsp_mobile"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const purchase = await db.getPurchaseById(input.purchaseId);
+        if (!purchase) throw new Error("Purchase order not found");
+        if (purchase.buyerId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new Error("Unauthorized to verify this purchase");
+        }
+        await db.updatePurchaseStatus(input.purchaseId, "completed", input.transactionReference);
+
+        if (purchase.sellerId) {
+          const seller = await db.getUserById(purchase.sellerId);
+          if (seller) {
+            const currentBal = parseFloat(seller.availableBalance || "0");
+            const currentEarnings = parseFloat(seller.totalEarnings || "0");
+            const sellerAmt = parseFloat(purchase.sellerAmount || "0");
+            await db.updateUserProfile(seller.id, {
+              availableBalance: (currentBal + sellerAmt).toFixed(2),
+              totalEarnings: (currentEarnings + sellerAmt).toFixed(2),
+            });
+          }
+        }
+
+        let downloadUrl = "";
+        if (purchase.trackId) {
+          await db.createDownload({
+            userId: ctx.user.id,
+            trackId: purchase.trackId,
+            purchaseId: purchase.id,
+          });
+          await db.incrementUserDownloadCount(ctx.user.id);
+          const track = await db.getTrackById(purchase.trackId);
+          if (track) {
+            downloadUrl = track.audioUrl;
+          }
+        }
+
+        return {
+          success: true,
+          status: "completed",
+          purchaseId: purchase.id,
+          downloadUrl,
+          message: "Payment verified successfully via Mobile Banking! Track is now unlocked in your library.",
+        };
       }),
     
     getUserPurchases: protectedProcedure.query(async ({ ctx }) => {
@@ -425,7 +486,20 @@ export const appRouter = router({
       }),
     
     getUserDownloads: protectedProcedure.query(async ({ ctx }) => {
-      return db.getUserDownloads(ctx.user.id);
+      const list = await db.getUserDownloads(ctx.user.id);
+      const enriched = await Promise.all(
+        list.map(async (d) => {
+          let track = null;
+          if (d.trackId) {
+            track = await db.getTrackById(d.trackId);
+          }
+          return {
+            ...d,
+            track,
+          };
+        })
+      );
+      return enriched;
     }),
   }),
 

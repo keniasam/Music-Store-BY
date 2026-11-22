@@ -63,6 +63,66 @@ async function startServer() {
   }
   app.use("/uploads", express.static(uploadsDir));
 
+  // Streaming audio endpoint supporting HTTP 206 Partial Content Range Requests
+  app.get("/api/stream/*", (req, res) => {
+    const rawPath = (req.params as any)[0] || "";
+    if (!rawPath) {
+      return res.status(400).send("File path missing");
+    }
+    const safePath = path.normalize(rawPath).replace(/^(\.\.[\/\\])+/, "");
+    let filePath = path.resolve(process.cwd(), "uploads", safePath);
+    if (!fs.existsSync(filePath)) {
+      filePath = path.resolve(process.cwd(), safePath);
+    }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return res.status(404).send("Audio file not found");
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType =
+      ext === ".mp3"
+        ? "audio/mpeg"
+        : ext === ".wav"
+        ? "audio/wav"
+        : ext === ".m4a"
+        ? "audio/mp4"
+        : ext === ".ogg"
+        ? "audio/ogg"
+        : "audio/mpeg";
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize || end >= fileSize) {
+        res.status(416).header("Content-Range", `bytes */${fileSize}`).send("Requested range not satisfiable");
+        return;
+      }
+
+      const chunksize = end - start + 1;
+      const file = fs.createReadStream(filePath, { start, end });
+      res.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": chunksize,
+        "Content-Type": contentType,
+      });
+      file.pipe(res);
+    } else {
+      res.writeHead(200, {
+        "Content-Length": fileSize,
+        "Content-Type": contentType,
+        "Accept-Ranges": "bytes",
+      });
+      fs.createReadStream(filePath).pipe(res);
+    }
+  });
+
   registerOAuthRoutes(app);
 
   app.get("/api/health", (_req, res) => {

@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { eq, desc, and, or, like, sql, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
@@ -34,6 +36,59 @@ export async function getDb() {
 
 // ============ IN-MEMORY FALLBACK STORE ============
 
+
+const DATA_DIR = path.resolve(process.cwd(), "data");
+const STORE_FILE = path.resolve(DATA_DIR, "local-db.json");
+
+function saveStoreToDisk(store: MemoryStore) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const serialized = {
+      users: Array.from(store.users.entries()),
+      usersByOpenId: Array.from(store.usersByOpenId.entries()),
+      tracks: Array.from(store.tracks.entries()),
+      purchases: Array.from(store.purchases.entries()),
+      downloads: Array.from(store.downloads.entries()),
+      subscriptions: Array.from(store.subscriptions.entries()),
+      likes: Array.from(store.likes.entries()),
+      comments: Array.from(store.comments.entries()),
+      messages: Array.from(store.messages.entries()),
+      products: Array.from(store.products.entries()),
+      follows: Array.from(store.follows.entries()),
+      notifications: Array.from(store.notifications.entries()),
+      withdrawals: Array.from(store.withdrawals.entries()),
+      aiGenerations: Array.from(store.aiGenerations.entries()),
+      nextId: store.nextId,
+    };
+    fs.writeFileSync(STORE_FILE, JSON.stringify(serialized, null, 2), "utf-8");
+  } catch (error) {
+    console.warn("[Database] Failed to save local-db.json to disk:", error);
+  }
+}
+
+let saveTimeout: any = null;
+export function scheduleSaveStore() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveStoreToDisk(memoryStore);
+  }, 100);
+}
+
+export function generateTrackWaveform(trackId: number, count = 60): number[] {
+  const bars: number[] = [];
+  let seed = trackId * 9301 + 49297;
+  for (let i = 0; i < count; i++) {
+    seed = (seed * 9301 + 49297) % 233280;
+    const rnd = seed / 233280;
+    const envelope = Math.sin(((i + 1) / (count + 1)) * Math.PI);
+    const value = Math.max(0.18, Math.min(0.96, (0.35 + 0.65 * rnd) * (0.45 + 0.55 * envelope)));
+    bars.push(parseFloat(value.toFixed(2)));
+  }
+  return bars;
+}
+
 interface MemoryStore {
   users: Map<number, User>;
   usersByOpenId: Map<string, number>;
@@ -53,6 +108,61 @@ interface MemoryStore {
 }
 
 function initializeMemoryStore(): MemoryStore {
+  if (fs.existsSync(STORE_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(STORE_FILE, "utf-8"));
+      const reviveMap = <K, V>(entries: [K, V][]): Map<K, V> => {
+        const m = new Map<K, V>();
+        if (Array.isArray(entries)) {
+          for (const [k, v] of entries) {
+            if (v && typeof v === "object") {
+              for (const prop in v) {
+                if (typeof (v as any)[prop] === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test((v as any)[prop])) {
+                  (v as any)[prop] = new Date((v as any)[prop]);
+                }
+              }
+            }
+            m.set(k, v);
+          }
+        }
+        return m;
+      };
+
+      return {
+        users: reviveMap(data.users),
+        usersByOpenId: new Map(data.usersByOpenId || []),
+        tracks: reviveMap(data.tracks),
+        purchases: reviveMap(data.purchases),
+        downloads: reviveMap(data.downloads),
+        subscriptions: reviveMap(data.subscriptions),
+        likes: reviveMap(data.likes),
+        comments: reviveMap(data.comments),
+        messages: reviveMap(data.messages),
+        products: reviveMap(data.products),
+        follows: reviveMap(data.follows),
+        notifications: reviveMap(data.notifications),
+        withdrawals: reviveMap(data.withdrawals),
+        aiGenerations: reviveMap(data.aiGenerations),
+        nextId: data.nextId || {
+          users: 4,
+          tracks: 8,
+          purchases: 2,
+          downloads: 2,
+          subscriptions: 1,
+          likes: 3,
+          comments: 2,
+          messages: 1,
+          products: 1,
+          follows: 1,
+          notifications: 1,
+          withdrawals: 1,
+          aiGenerations: 1,
+        },
+      };
+    } catch (e) {
+      console.warn("[Database] Could not parse existing local-db.json, re-seeding:", e);
+    }
+  }
   const store: MemoryStore = {
     users: new Map(),
     usersByOpenId: new Map(),
@@ -408,6 +518,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
         updatedAt: new Date(),
       };
       memoryStore.users.set(existing.id, updated);
+    scheduleSaveStore();
     } else {
       const id = memoryStore.nextId.users++;
       const newUser: User = {
@@ -435,7 +546,9 @@ export async function upsertUser(user: InsertUser): Promise<void> {
         lastSignedIn: user.lastSignedIn || new Date(),
       };
       memoryStore.users.set(id, newUser);
+    scheduleSaveStore();
       memoryStore.usersByOpenId.set(user.openId, id);
+    scheduleSaveStore();
     }
     return;
   }
@@ -514,6 +627,7 @@ export async function updateUserProfile(userId: number, data: Partial<InsertUser
     const user = memoryStore.users.get(userId);
     if (user) {
       memoryStore.users.set(userId, { ...user, ...data, updatedAt: new Date() } as User);
+    scheduleSaveStore();
     }
     return;
   }
@@ -531,6 +645,7 @@ export async function updateUserSubscription(userId: number, tier: "free" | "pre
         subscriptionExpiresAt: expiresAt, 
         updatedAt: new Date() 
       });
+    scheduleSaveStore();
     }
     return;
   }
@@ -546,6 +661,7 @@ export async function incrementUserUploadCount(userId: number): Promise<void> {
     const user = memoryStore.users.get(userId);
     if (user) {
       memoryStore.users.set(userId, { ...user, uploadCount: user.uploadCount + 1, updatedAt: new Date() });
+    scheduleSaveStore();
     }
     return;
   }
@@ -560,6 +676,7 @@ export async function incrementUserDownloadCount(userId: number): Promise<void> 
     const user = memoryStore.users.get(userId);
     if (user) {
       memoryStore.users.set(userId, { ...user, downloadCount: user.downloadCount + 1, updatedAt: new Date() });
+    scheduleSaveStore();
     }
     return;
   }
@@ -597,6 +714,7 @@ export async function createTrack(data: InsertTrack): Promise<number> {
       updatedAt: new Date(),
     };
     memoryStore.tracks.set(id, newTrack);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(tracks).values(data);
@@ -685,6 +803,7 @@ export async function updateTrack(id: number, data: Partial<InsertTrack>): Promi
     const track = memoryStore.tracks.get(id);
     if (track) {
       memoryStore.tracks.set(id, { ...track, ...data, updatedAt: new Date() } as Track);
+    scheduleSaveStore();
     }
     return;
   }
@@ -698,6 +817,7 @@ export async function incrementPlayCount(trackId: number): Promise<void> {
     if (track) {
       track.playCount += 1;
       memoryStore.tracks.set(trackId, track);
+    scheduleSaveStore();
     }
     return;
   }
@@ -745,10 +865,20 @@ export async function createPurchase(data: InsertPurchase): Promise<number> {
       updatedAt: new Date(),
     };
     memoryStore.purchases.set(id, purchase);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(purchases).values(data);
   return result[0].insertId;
+}
+
+export async function getPurchaseById(id: number): Promise<Purchase | undefined> {
+  const db = await getDb();
+  if (!db) {
+    return memoryStore.purchases.get(id);
+  }
+  const result = await db.select().from(purchases).where(eq(purchases.id, id)).limit(1);
+  return result[0];
 }
 
 export async function getUserPurchases(userId: number): Promise<Purchase[]> {
@@ -805,6 +935,7 @@ export async function updatePurchaseStatus(
       if (transactionId) purchase.transactionId = transactionId;
       purchase.updatedAt = new Date();
       memoryStore.purchases.set(id, purchase);
+    scheduleSaveStore();
     }
     return;
   }
@@ -828,6 +959,7 @@ export async function createDownload(data: InsertDownload): Promise<number> {
       downloadedAt: new Date(),
     };
     memoryStore.downloads.set(id, download);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(downloads).values(data);
@@ -877,6 +1009,7 @@ export async function createSubscription(data: InsertSubscription): Promise<numb
       updatedAt: new Date(),
     };
     memoryStore.subscriptions.set(id, sub);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(subscriptions).values(data);
@@ -904,6 +1037,7 @@ export async function updateSubscriptionStatus(id: number, status: "active" | "c
       sub.status = status;
       sub.updatedAt = new Date();
       memoryStore.subscriptions.set(id, sub);
+    scheduleSaveStore();
     }
     return;
   }
@@ -924,11 +1058,13 @@ export async function createLike(data: InsertLike): Promise<number> {
       createdAt: new Date(),
     };
     memoryStore.likes.set(id, likeItem);
+    scheduleSaveStore();
     if (data.trackId) {
       const track = memoryStore.tracks.get(data.trackId);
       if (track) {
         track.likeCount += 1;
         memoryStore.tracks.set(data.trackId, track);
+    scheduleSaveStore();
       }
     }
     return id;
@@ -948,6 +1084,7 @@ export async function deleteLike(userId: number, trackId: number): Promise<void>
     for (const [id, likeItem] of memoryStore.likes.entries()) {
       if (likeItem.userId === userId && likeItem.trackId === trackId) {
         memoryStore.likes.delete(id);
+    scheduleSaveStore();
         break;
       }
     }
@@ -955,6 +1092,7 @@ export async function deleteLike(userId: number, trackId: number): Promise<void>
     if (track && track.likeCount > 0) {
       track.likeCount -= 1;
       memoryStore.tracks.set(trackId, track);
+    scheduleSaveStore();
     }
     return;
   }
@@ -1015,6 +1153,7 @@ export async function createComment(data: InsertComment): Promise<number> {
       updatedAt: new Date(),
     };
     memoryStore.comments.set(id, comment);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(comments).values(data);
@@ -1037,6 +1176,7 @@ export async function deleteComment(id: number): Promise<void> {
   const db = await getDb();
   if (!db) {
     memoryStore.comments.delete(id);
+    scheduleSaveStore();
     return;
   }
   await db.delete(comments).where(eq(comments.id, id));
@@ -1057,6 +1197,7 @@ export async function createMessage(data: InsertMessage): Promise<number> {
       createdAt: new Date(),
     };
     memoryStore.messages.set(id, msg);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(messages).values(data);
@@ -1101,6 +1242,7 @@ export async function markMessageAsRead(id: number): Promise<void> {
     if (msg) {
       msg.isRead = true;
       memoryStore.messages.set(id, msg);
+    scheduleSaveStore();
     }
     return;
   }
@@ -1128,6 +1270,7 @@ export async function createProduct(data: InsertProduct): Promise<number> {
       updatedAt: new Date(),
     };
     memoryStore.products.set(id, product);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(products).values(data);
@@ -1167,6 +1310,7 @@ export async function createFollow(data: InsertFollow): Promise<number> {
   if (!db) {
     const id = memoryStore.nextId.follows++;
     memoryStore.follows.set(id, { id, followerId: data.followerId, followingId: data.followingId, createdAt: new Date() });
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(follows).values(data);
@@ -1179,6 +1323,7 @@ export async function deleteFollow(followerId: number, followingId: number): Pro
     for (const [id, f] of memoryStore.follows.entries()) {
       if (f.followerId === followerId && f.followingId === followingId) {
         memoryStore.follows.delete(id);
+    scheduleSaveStore();
         break;
       }
     }
@@ -1233,6 +1378,7 @@ export async function createNotification(data: InsertNotification): Promise<numb
       createdAt: new Date(),
     };
     memoryStore.notifications.set(id, notif);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(notifications).values(data);
@@ -1260,6 +1406,7 @@ export async function markNotificationAsRead(id: number): Promise<void> {
     if (notif) {
       notif.isRead = true;
       memoryStore.notifications.set(id, notif);
+    scheduleSaveStore();
     }
     return;
   }
@@ -1273,6 +1420,7 @@ export async function markAllNotificationsAsRead(userId: number): Promise<void> 
       if (notif.userId === userId) {
         notif.isRead = true;
         memoryStore.notifications.set(id, notif);
+    scheduleSaveStore();
       }
     }
     return;
@@ -1299,6 +1447,7 @@ export async function createWithdrawal(data: InsertWithdrawal): Promise<number> 
       updatedAt: new Date(),
     };
     memoryStore.withdrawals.set(id, w);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(withdrawals).values(data);
@@ -1329,6 +1478,7 @@ export async function updateWithdrawalStatus(
       if (status === "completed") w.processedAt = new Date();
       w.updatedAt = new Date();
       memoryStore.withdrawals.set(id, w);
+    scheduleSaveStore();
     }
     return;
   }
@@ -1356,6 +1506,7 @@ export async function createAiGeneration(data: InsertAiGeneration): Promise<numb
       createdAt: new Date(),
     };
     memoryStore.aiGenerations.set(id, gen);
+    scheduleSaveStore();
     return id;
   }
   const result = await db.insert(aiGenerations).values(data);
@@ -1380,6 +1531,7 @@ export async function updateAiGeneration(id: number, data: Partial<InsertAiGener
     const gen = memoryStore.aiGenerations.get(id);
     if (gen) {
       memoryStore.aiGenerations.set(id, { ...gen, ...data });
+    scheduleSaveStore();
     }
     return;
   }

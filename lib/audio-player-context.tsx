@@ -20,12 +20,15 @@ interface AudioPlayerContextType {
   position: number;
   duration: number;
   isLoading: boolean;
+  offlineTrackIds: number[];
   playTrack: (track: PlayableTrack) => Promise<void>;
   togglePlayPause: () => void;
   pause: () => void;
   resume: () => void;
   seekTo: (seconds: number) => void;
   stop: () => void;
+  saveTrackOffline: (track: PlayableTrack) => Promise<boolean>;
+  isOfflineSaved: (trackId: number) => boolean;
 }
 
 const AudioPlayerContext = createContext<AudioPlayerContextType>({
@@ -34,12 +37,15 @@ const AudioPlayerContext = createContext<AudioPlayerContextType>({
   position: 0,
   duration: 0,
   isLoading: false,
+  offlineTrackIds: [],
   playTrack: async () => {},
   togglePlayPause: () => {},
   pause: () => {},
   resume: () => {},
   seekTo: () => {},
   stop: () => {},
+  saveTrackOffline: async () => false,
+  isOfflineSaved: () => false,
 });
 
 export function AudioPlayerProvider({ children }: { children: React.ReactNode }) {
@@ -48,6 +54,52 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   const [position, setPosition] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [offlineTrackIds, setOfflineTrackIds] = useState<number[]>([]);
+
+  // Load offline IDs on startup
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined" && window.localStorage) {
+      try {
+        const stored = window.localStorage.getItem("bilong_yumi_offline_tracks");
+        if (stored) {
+          const ids = JSON.parse(stored);
+          if (Array.isArray(ids)) setOfflineTrackIds(ids);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  const isOfflineSaved = useCallback((trackId: number) => {
+    return offlineTrackIds.includes(trackId);
+  }, [offlineTrackIds]);
+
+  const saveTrackOffline = useCallback(async (track: PlayableTrack): Promise<boolean> => {
+    try {
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        if ("caches" in window) {
+          const cache = await caches.open("music-store-audio");
+          await cache.add(track.audioUrl);
+        }
+        setOfflineTrackIds((prev) => {
+          if (prev.includes(track.id)) return prev;
+          const next = [...prev, track.id];
+          if (window.localStorage) {
+            window.localStorage.setItem("bilong_yumi_offline_tracks", JSON.stringify(next));
+          }
+          return next;
+        });
+        return true;
+      }
+      // Native fallback
+      setOfflineTrackIds((prev) => (prev.includes(track.id) ? prev : [...prev, track.id]));
+      return true;
+    } catch (err) {
+      console.warn("[Audio] Failed to cache audio offline:", err);
+      return false;
+    }
+  }, []);
 
   // Web audio ref
   const webAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -206,12 +258,15 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
         position,
         duration,
         isLoading,
+        offlineTrackIds,
         playTrack,
         togglePlayPause,
         pause,
         resume,
         seekTo,
         stop,
+        saveTrackOffline,
+        isOfflineSaved,
       }}
     >
       {children}

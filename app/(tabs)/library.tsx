@@ -1,4 +1,4 @@
-import { ScrollView, Text, View, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, FlatList, ActivityIndicator, Image } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
 
@@ -16,7 +16,7 @@ export default function LibraryScreen() {
   const colors = useColors();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const { currentTrack, isPlaying, playTrack, togglePlayPause } = useAudioPlayer();
+  const { currentTrack, isPlaying, playTrack, togglePlayPause, isOfflineSaved, saveTrackOffline } = useAudioPlayer();
   const [activeTab, setActiveTab] = useState<LibraryTab>("uploads");
 
   const tabs: { id: LibraryTab; label: string; icon: any }[] = [
@@ -298,37 +298,91 @@ export default function LibraryScreen() {
                 </Text>
               </View>
             ) : (
-              userDownloads.map((download) => (
-                <View 
-                  key={download.id}
-                  className="flex-row items-center py-3 border-b"
-                  style={{ borderBottomColor: colors.border }}
-                >
+              userDownloads.map((download) => {
+                const trk = (download as any).track;
+                const isCached = isOfflineSaved(download.trackId || 0);
+                return (
                   <View 
-                    className="w-12 h-12 rounded-xl items-center justify-center mr-3"
-                    style={{ backgroundColor: colors.success + '20' }}
+                    key={download.id}
+                    className="flex-row items-center py-3 border-b"
+                    style={{ borderBottomColor: colors.border }}
                   >
-                    <IconSymbol name="checkmark.circle.fill" size={22} color={colors.success} />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
-                      Downloaded Track #{download.trackId}
-                    </Text>
-                    <Text className="text-muted text-xs mt-0.5">
-                      Downloaded {new Date(download.downloadedAt).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  {download.trackId && (
-                    <TouchableOpacity 
-                      onPress={() => router.push(`/track/${download.trackId}` as any)}
-                      className="px-3 py-1.5 rounded-full"
-                      style={{ backgroundColor: colors.primary }}
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (trk) handlePlay(trk);
+                      }}
+                      className="w-12 h-12 rounded-xl items-center justify-center mr-3 overflow-hidden shadow-sm"
+                      style={{ backgroundColor: colors.surface }}
                     >
-                      <Text className="text-white text-xs font-semibold">Open</Text>
+                      {trk?.coverUrl ? (
+                        <Image source={{ uri: trk.coverUrl }} className="w-full h-full" resizeMode="cover" />
+                      ) : (
+                        <IconSymbol
+                          name={currentTrack?.id === download.trackId && isPlaying ? "pause.fill" : "play.fill"}
+                          size={20}
+                          color={colors.primary}
+                        />
+                      )}
                     </TouchableOpacity>
-                  )}
-                </View>
-              ))
+                    <View className="flex-1 mr-2">
+                      <Text className="text-foreground font-semibold text-sm" numberOfLines={1}>
+                        {trk?.title || `Downloaded Track #${download.trackId}`}
+                      </Text>
+                      <View className="flex-row items-center mt-0.5 gap-2">
+                        {isCached && (
+                          <View
+                            className="px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: colors.success + "25" }}
+                          >
+                            <Text
+                              className="text-[10px] font-bold"
+                              style={{ color: colors.success }}
+                            >
+                              Offline Ready
+                            </Text>
+                          </View>
+                        )}
+                        <Text className="text-muted text-xs" numberOfLines={1}>
+                          {trk?.genre ? `${trk.genre} • ` : ""}
+                          {new Date(download.downloadedAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="flex-row items-center gap-2">
+                      {download.trackId && (
+                        <TouchableOpacity 
+                          onPress={() => router.push(`/track/${download.trackId}` as any)}
+                          className="px-3 py-1.5 rounded-full border"
+                          style={{ borderColor: colors.border, backgroundColor: colors.surface }}
+                        >
+                          <Text className="text-foreground text-xs font-semibold">Details</Text>
+                        </TouchableOpacity>
+                      )}
+                      {trk && !isCached && (
+                        <TouchableOpacity
+                          onPress={async () => {
+                            await saveTrackOffline({
+                              id: trk.id,
+                              title: trk.title,
+                              artist: trk.artist || "PNG Artist",
+                              genre: trk.genre,
+                              duration: trk.duration,
+                              audioUrl: trk.audioUrl,
+                              coverUrl: trk.coverUrl,
+                              price: trk.price,
+                              isFree: trk.isFree,
+                            });
+                          }}
+                          className="px-2.5 py-1.5 rounded-full"
+                          style={{ backgroundColor: colors.primary + "18" }}
+                        >
+                          <IconSymbol name="arrow.down.circle.fill" size={16} color={colors.primary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
             )}
           </View>
         )}
